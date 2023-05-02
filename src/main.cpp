@@ -23,18 +23,23 @@ String form_gateway;
 String form_node;
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
+boolean isWaitingForConnectionPingResponse = false;
 boolean isConnectionReady = false;
 boolean isResponseDestinationCorrect = false;
+boolean isGatewayAvailable = false;
 boolean isDoorOpen = false;
-unsigned long authCheckTime = 0;
 unsigned long connectionStartupCheckTime = 0;
-unsigned long authRTOChecker = 0;
 unsigned long connectionStartupRTOChecker = 0;
+unsigned long connectionPingCheckTime = 0;
+unsigned long connectionPingRTOChecker = 0;
+unsigned long authCheckTime = 0;
+unsigned long authRTOChecker = 0;
 unsigned long doorTimestamp = 0;
 const char *PARAM_INPUT_1 = "ssid"; // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_2 = "password";
 const char *PARAM_INPUT_3 = "node";
 const char *PARAM_INPUT_4 = "gateway";
+
 // File paths to save input values permanentlys
 const char *nodePath = "/node.txt";
 const char *ssidPath = "/ssid.txt";
@@ -52,9 +57,9 @@ IPAddress subnet(255, 255, 0, 0);
 // Initialize SPIFFS
 void initSPIFFS() {
   if (!SPIFFS.begin(true)) {
-    Serial.println("An error has occurred while mounting SPIFFS");
+    Serial.println("[e]: An error has occurred while mounting SPIFFS");
   }
-  Serial.println("SPIFFS mounted successfully");
+  Serial.println("[x]: SPIFFS mounted successfully");
 }
 
 // Read File from SPIFFS
@@ -95,7 +100,7 @@ void writeFile(fs::FS &fs, const char *path, const char *message) {
 bool initMesh() {
   if (form_ssid == "" || form_password == "" || form_gateway == "" ||
       form_node == "") {
-    Serial.println("Undefined SSID, Password, Gateway, Node Value.");
+    Serial.println("[e]: Undefined SSID, Password, Gateway, Node Value.");
     return false;
   }
 
@@ -199,61 +204,85 @@ void setup() {
 
     mesh.onReceive([](String &from, String &msg) {
       digitalWrite(LED, HIGH);
-      Serial.printf("[i]: Get Response From Gateway: %s. %s\n", from.c_str(),
-                    msg.c_str());
-
-      // FOR AUTH STATISTIC PURPOSE
-      if (isWaitingForAuthResponse) {
-        isWaitingForAuthResponse = false; // 11 - 10 = 1
-        unsigned long waitingTime = millis() - authRTOChecker;
-        Serial.println("[i]: Auth Response time: " + String(waitingTime));
-      }
+      // Serial.printf("[i]: Get Response From Gateway: %s. %s\n", from.c_str(),
+      //               msg.c_str());
 
       // Pastikan Data Yang Diterima Memang Ditujukan Untuk Node Ini, Ubah Data
       // menjadi JSON Terlebih dahulu
       StaticJsonDocument<200> doc;
       DeserializationError error = deserializeJson(doc, msg.c_str());
       if (error) {
-        Serial.println("Failed to deserializeJson");
+        Serial.println("[e]: Failed to deserializeJson");
         Serial.println(error.f_str());
         return;
       }
 
+      String destination =
+          doc["destination"]; // Destinasi akhir data yang diterima,dan akan
+                              // menjadi sumber data (source) ketika response
+                              // balik diberikan
+      String source =
+          doc["source"]; // Sumber pengirim data, dan akan menjadi destinasi
+                         // akhir ketika response balik diberikan
+      String type = doc["type"];
+
       // memastikan data yang ditujukan sesuai,
       // *opsional untuk melakukan pengecekan dari mana sumber data yang
       // diterima
-      if (doc["destination"] == form_node) {
+      if (destination == form_node) {
         isResponseDestinationCorrect = true;
       }
 
-      // Jika tipe response yang diterima adalah "auth"
+      // INFO: Jika tipe response yang diterima adalah "auth"
       // Melihat response apakah pintu bisa dibuka
-      if (isResponseDestinationCorrect && doc["success"] == true &&
-          doc["type"] == "auth") {
+      if (isWaitingForAuthResponse && isResponseDestinationCorrect &&
+          doc["success"] == true && type == "auth") {
+        unsigned long arrivalTime = millis();
+        unsigned long waitingTime = arrivalTime - authRTOChecker;
+        Serial.println("[i]: Auth request start on " + String(authRTOChecker) +
+                       " receive response on " + String(arrivalTime) +
+                       " final response time " + String(waitingTime));
+        doorTimestamp = millis();
+        Serial.println("[i]: Sukses Membuka Pintu");
+        isWaitingForAuthResponse = false;     // reset value
         isResponseDestinationCorrect = false; // reset value
         isDoorOpen = true;
-        doorTimestamp = millis();
-        Serial.println("Sukses Membuka Pintu");
       }
 
-      // Jika response yang diterima adalah "connectionstartup"
-      if (isWaitingForConnectionStartupResponse) {
+      // INFO: Jika response yang diterima adalah "connectionstartup"
+      if (isWaitingForConnectionStartupResponse &&
+          isResponseDestinationCorrect && doc["success"] == true &&
+          type == "connectionstartup") {
         unsigned long waitingTime = millis() - connectionStartupRTOChecker;
-        Serial.println("Connection Ready in " + String(waitingTime) + " ms");
+        Serial.println("[x]: Connection Ready in " + String(waitingTime) +
+                       " ms");
+        Serial.println("[x]: Device Ready");
+        isWaitingForConnectionStartupResponse = false; // reset value
+        isResponseDestinationCorrect = false;          // reset value
+        isConnectionReady = true;  // allow device to operate
+        isGatewayAvailable = true; // alllow user to tap their card
       }
 
-      if (isResponseDestinationCorrect && doc["success"] == true &&
-          doc["type"] == "connectionstartup") {
-        Serial.println("DEVICE READY");
-        isResponseDestinationCorrect = false;          // reset value
-        isWaitingForConnectionStartupResponse = false; // reset value
-        isConnectionReady = true; // allow device to operate
+      // INFO: Jika response yang diterima adalah "connectionping"
+      if (isWaitingForConnectionPingResponse && isResponseDestinationCorrect &&
+          doc["success"] == true && doc["type"] == "connectionping") {
+        unsigned long arrivalTime = millis();
+        unsigned long waitingTime = arrivalTime - connectionPingRTOChecker;
+        Serial.println("[i]: Connection Ping start on " +
+                       String(connectionPingRTOChecker) + " receive reply on " +
+                       String(arrivalTime) + " final response time " +
+                       String(waitingTime));
+        isWaitingForConnectionPingResponse = false; // reset value
+        isResponseDestinationCorrect = false;       // reset value
+        Serial.println("[x]: Gateway Still Available");
+        // isConnectionReady = true;  // allow device to operate
+        // isGatewayAvailable = true; // alllow user to tap their card
       }
       digitalWrite(LED, LOW);
     });
 
     mesh.onChangedConnections(
-        []() { Serial.printf(" [M]: Changed Connection\n"); });
+        []() { Serial.printf("[M]: Changed Connection\n"); });
   }
   // When First Start Up try to connect to gateway
   while (isConnectionReady == false) {
@@ -261,14 +290,14 @@ void setup() {
     // MENGIRIM PESAN SETIAP 5 DETIK
     uint64_t now = millis();
     if (now - connectionStartupCheckTime > 5000) {
-      Serial.println("Sending Connection Startup");
+      Serial.println("[x]: Sending Connection Startup");
       connectionStartupCheckTime = millis();
       String msg = "{\"type\":\"connectionstartup\", \"source\":\"" +
                    NODE_FULL_NAME + "\", \"destination\" : \"" +
                    NODE_DESTINATION + +"\"}";
+      connectionStartupRTOChecker = millis();
       mesh.sendSingle(form_gateway, msg);
       isWaitingForConnectionStartupResponse = true;
-      connectionStartupRTOChecker = millis();
     }
 
     /* code */
@@ -279,30 +308,30 @@ long id = 0;
 void loop() {
   if (isConnectionReady) {
     mesh.update();
-    // MENGIRIM PESAN SETIAP 20 DETIK
+    // MENGIRIM PESAN SETIAP 10 DETIK
     uint64_t now = millis();
-    if (now - authCheckTime > 20000) {
+    if (now - authCheckTime > 10000) {
       authCheckTime = millis();
       String msg = "{\"msgid\" : \"" + String(id) +
                    "\",\"type\":\"auth\",\"source\" : \"" + NODE_FULL_NAME +
                    "\",\"destination\" : \"" + NODE_DESTINATION +
                    "\",\"card\": "
                    "{\"id\" : \"4448c29FeAF0\",\"pin\" : \"123456\"}}";
+      authRTOChecker = millis(); // 10
       Serial.println("[i]: Sending Request To Gateway");
       mesh.sendSingle(form_gateway, msg);
-      authRTOChecker = millis(); // 10
       isWaitingForAuthResponse = true;
       id++;
     }
 
     if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
-      Serial.println(" [M]: RTO");
+      Serial.println("[x]: AUTH RTO");
       isWaitingForAuthResponse = false;
     }
 
     // if (isWaitingForAuthResponse) {
     // Lakukan Sesuatu Ketika Sedang Menunggu Response
-    //   Serial.println(" [M]: Waiting...");
+    //   Serial.println("[x]: Waiting...");
     // }
 
     // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama pintu
@@ -312,11 +341,30 @@ void loop() {
       // Relay Menyala Untuk Membuka Pintu
     }
 
-    // Jika Sudah melbihi batas waktu durasi membuka pintu maka matikan relay
+    // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
     if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
       // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
       // Relay Mati Pintu, Kembali terkunci
       isDoorOpen = false;
+    }
+
+    // INFO: Ketersediaan Gateway
+    // Lakukan ping setiap 120 detik untuk melihat ketersediaan gateway
+    if (now - connectionPingCheckTime > 120000) {
+      connectionPingCheckTime = millis();
+      Serial.println("[x]: Sending Connection Ping");
+      String msg = "{\"type\":\"connectionping\", \"source\":\"" +
+                   NODE_FULL_NAME + "\", \"destination\" : \"" +
+                   NODE_DESTINATION + +"\"}";
+      mesh.sendSingle(form_gateway, msg);
+      connectionPingRTOChecker = millis();
+      isWaitingForConnectionPingResponse = true;
+    }
+
+    if (isWaitingForConnectionPingResponse &&
+        millis() - connectionPingRTOChecker > RTO_LIMIT) {
+      Serial.println("[x]: PING RTO");
+      isWaitingForConnectionPingResponse = false;
     }
   }
 }
