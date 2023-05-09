@@ -11,16 +11,14 @@
 #define MESH_PASSWORD "t4np454nd1"
 #define LED 2
 #define MESH_PORT 5555
-#define RTO_LIMIT 10000         // 10s
+// #define RTO_LIMIT 10000         // 10s
+#define RTO_LIMIT 8000          // 8s
 #define DOOR_OPEN_DURATION 5000 // 5s
 
-String NODE_ID = "EkXeg";
-String NODE_FULL_NAME = "NODE-" + NODE_ID;
-String NODE_DESTINATION = "GATEWAY-nkXgI";
-String form_ssid; // Variables to save values from HTML form
-String form_password;
-String form_gateway;
-String form_node;
+String DATA_SSID; // Variables to save values from HTML form
+String DATA_PASSWORD;
+String DATA_GATEWAY;
+String DATA_NODE;
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
 boolean isWaitingForConnectionPingResponse = false;
@@ -28,6 +26,7 @@ boolean isConnectionReady = false;
 boolean isResponseDestinationCorrect = false;
 boolean isGatewayAvailable = false;
 boolean isDoorOpen = false;
+boolean APStatus = false;
 unsigned long connectionStartupCheckTime = 0;
 unsigned long connectionStartupRTOChecker = 0;
 unsigned long connectionPingCheckTime = 0;
@@ -39,6 +38,7 @@ const char *PARAM_INPUT_1 = "ssid"; // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_2 = "password";
 const char *PARAM_INPUT_3 = "node";
 const char *PARAM_INPUT_4 = "gateway";
+const int TOUCH_RESET_PIN = 4;
 
 // File paths to save input values permanentlys
 const char *nodePath = "/node.txt";
@@ -97,14 +97,25 @@ void writeFile(fs::FS &fs, const char *path, const char *message) {
 }
 
 // Initialize Mesh
-bool initMesh() {
-  if (form_ssid == "" || form_password == "" || form_gateway == "" ||
-      form_node == "") {
+bool meshStatus() {
+  if (DATA_SSID == "" || DATA_PASSWORD == "" || DATA_GATEWAY == "" ||
+      DATA_NODE == "") {
     Serial.println("[e]: Undefined SSID, Password, Gateway, Node Value.");
     return false;
   }
-
   return true;
+}
+
+// Reset Mesh Network
+void meshReset() {
+  Serial.println("Attempting To Reset ESP Mesh Network");
+  String empty = "";
+  writeFile(SPIFFS, ssidPath, empty.c_str());
+  writeFile(SPIFFS, passwordPath, empty.c_str());
+  writeFile(SPIFFS, nodePath, empty.c_str());
+  writeFile(SPIFFS, gatewayPath, empty.c_str());
+  delay(3000);
+  ESP.restart();
 }
 
 void setup() {
@@ -116,21 +127,23 @@ void setup() {
   digitalWrite(LED, LOW);
 
   // read variable
-  form_ssid = readFile(SPIFFS, ssidPath);
-  form_password = readFile(SPIFFS, passwordPath);
-  form_node = readFile(SPIFFS, nodePath);
-  form_gateway = readFile(SPIFFS, gatewayPath);
+  DATA_SSID = readFile(SPIFFS, ssidPath);
+  DATA_PASSWORD = readFile(SPIFFS, passwordPath);
+  DATA_NODE = readFile(SPIFFS, nodePath);
+  DATA_GATEWAY = readFile(SPIFFS, gatewayPath);
   Serial.print("SSID: ");
-  Serial.println(form_ssid);
+  Serial.println(DATA_SSID);
   Serial.print("Password: ");
-  Serial.println(form_password);
+  Serial.println(DATA_PASSWORD);
   Serial.print("Node: ");
-  Serial.println(form_node);
+  Serial.println(DATA_NODE);
   Serial.print("Gateway: ");
-  Serial.println(form_gateway);
+  Serial.println(DATA_GATEWAY);
 
-  if (initMesh() == false) {
+  if (meshStatus() == false) {
+    // if (true) {
     // Connect to ESP Mesh network with SSID and password
+    APStatus = true;
     Serial.println("Setting AP (Access Point)");
     // NULL sets an open Access Point
     WiFi.softAP("ESP-MESH-MANAGER", NULL);
@@ -140,12 +153,13 @@ void setup() {
     Serial.println(IP);
 
     // Web Server Root URL
+    // server.serveStatic("/", SPIFFS, "/");
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send(SPIFFS, "/index.html", "text/html");
     });
-    server.serveStatic("/", SPIFFS, "/");
 
     // Handling POST Request
+
     server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
       int params = request->params();
       for (int i = 0; i < params; i++) {
@@ -153,35 +167,35 @@ void setup() {
         if (p->isPost()) {
           // HTTP POST ssid value
           if (p->name() == PARAM_INPUT_1) {
-            form_ssid = p->value().c_str();
+            DATA_SSID = p->value().c_str();
             Serial.print("SSID set to: ");
-            Serial.println(form_ssid);
+            Serial.println(DATA_SSID);
             // Write file to save value
-            writeFile(SPIFFS, ssidPath, form_ssid.c_str());
+            writeFile(SPIFFS, ssidPath, DATA_SSID.c_str());
           }
           // HTTP POST password value
           if (p->name() == PARAM_INPUT_2) {
-            form_password = p->value().c_str();
+            DATA_PASSWORD = p->value().c_str();
             Serial.print("Password set to: ");
-            Serial.println(form_password);
+            Serial.println(DATA_PASSWORD);
             // Write file to save value
-            writeFile(SPIFFS, passwordPath, form_password.c_str());
+            writeFile(SPIFFS, passwordPath, DATA_PASSWORD.c_str());
           }
           // HTTP POST Node value
           if (p->name() == PARAM_INPUT_3) {
-            form_node = p->value().c_str();
+            DATA_NODE = p->value().c_str();
             Serial.print("Node value set to: ");
-            Serial.println(form_node);
+            Serial.println(DATA_NODE);
             // Write file to save value
-            writeFile(SPIFFS, nodePath, form_node.c_str());
+            writeFile(SPIFFS, nodePath, DATA_NODE.c_str());
           }
           // HTTP POST gateway value
           if (p->name() == PARAM_INPUT_4) {
-            form_gateway = p->value().c_str();
+            DATA_GATEWAY = p->value().c_str();
             Serial.print("Gateway set to: ");
-            Serial.println(form_gateway);
+            Serial.println(DATA_GATEWAY);
             // Write file to save value
-            writeFile(SPIFFS, gatewayPath, form_gateway.c_str());
+            writeFile(SPIFFS, gatewayPath, DATA_GATEWAY.c_str());
           }
           // Serial.printf("POST[%s]: %s\n", p->name().c_str(),
           // p->value().c_str());
@@ -189,6 +203,7 @@ void setup() {
       }
       request->send(200, "text/plain",
                     "Done. ESP will restart, connect to ESP Mesh Network  ");
+      APStatus = false;
       delay(3000);
       ESP.restart();
     });
@@ -196,11 +211,11 @@ void setup() {
     server.begin();
   }
 
-  if (initMesh()) {
+  if (meshStatus() == true && APStatus == false) {
     Serial.println("Trying to connect to esp mesh");
     mesh.setDebugMsgTypes(ERROR | STARTUP);
-    mesh.init(form_ssid, form_password, &userScheduler, MESH_PORT);
-    mesh.setName(form_node);
+    mesh.init(DATA_SSID, DATA_PASSWORD, &userScheduler, MESH_PORT);
+    mesh.setName(DATA_NODE);
 
     mesh.onReceive([](String &from, String &msg) {
       digitalWrite(LED, HIGH);
@@ -229,7 +244,7 @@ void setup() {
       // memastikan data yang ditujukan sesuai,
       // *opsional untuk melakukan pengecekan dari mana sumber data yang
       // diterima
-      if (destination == form_node) {
+      if (destination == DATA_NODE) {
         isResponseDestinationCorrect = true;
       }
 
@@ -284,8 +299,10 @@ void setup() {
     mesh.onChangedConnections(
         []() { Serial.printf("[M]: Changed Connection\n"); });
   }
+
   // When First Start Up try to connect to gateway
-  while (isConnectionReady == false) {
+
+  while (isConnectionReady == false && APStatus == false) {
     mesh.update();
     // MENGIRIM PESAN SETIAP 5 DETIK
     uint64_t now = millis();
@@ -293,44 +310,47 @@ void setup() {
       Serial.println("[x]: Sending Connection Startup");
       connectionStartupCheckTime = millis();
       String msg = "{\"type\":\"connectionstartup\", \"source\":\"" +
-                   NODE_FULL_NAME + "\", \"destination\" : \"" +
-                   NODE_DESTINATION + +"\"}";
+                   DATA_NODE + "\", \"destination\" : \"" + DATA_GATEWAY +
+                   +"\"}";
       connectionStartupRTOChecker = millis();
-      mesh.sendSingle(form_gateway, msg);
+      mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForConnectionStartupResponse = true;
     }
-
-    /* code */
   }
 }
 
 long id = 0;
+int reading = 100;
 void loop() {
+  reading = touchRead(TOUCH_RESET_PIN);
+  if (reading < 20) {
+    meshReset();
+  }
   if (isConnectionReady) {
     mesh.update();
     // MENGIRIM PESAN SETIAP 10 DETIK
     uint64_t now = millis();
-    if (now - authCheckTime > 10000) {
-      authCheckTime = millis();
+    if (now - authCheckTime > 15000) {
       String msg = "{\"msgid\" : \"" + String(id) +
-                   "\",\"type\":\"auth\",\"source\" : \"" + NODE_FULL_NAME +
-                   "\",\"destination\" : \"" + NODE_DESTINATION +
+                   "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
+                   "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
                    "{\"id\" : \"4448c29FeAF0\",\"pin\" : \"123456\"}}";
+      authCheckTime = millis();
       authRTOChecker = millis(); // 10
       Serial.println("[i]: Sending Request To Gateway");
-      mesh.sendSingle(form_gateway, msg);
+      mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForAuthResponse = true;
       id++;
     }
 
     if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
-      Serial.println("[x]: AUTH RTO");
+      Serial.println("[i]: AUTH RTO");
       isWaitingForAuthResponse = false;
     }
 
     // if (isWaitingForAuthResponse) {
-    // Lakukan Sesuatu Ketika Sedang Menunggu Response
+    //   // Lakukan Sesuatu Ketika Sedang Menunggu Response
     //   Serial.println("[x]: Waiting...");
     // }
 
@@ -350,13 +370,12 @@ void loop() {
 
     // INFO: Ketersediaan Gateway
     // Lakukan ping setiap 120 detik untuk melihat ketersediaan gateway
-    if (now - connectionPingCheckTime > 120000) {
+    if (now - connectionPingCheckTime > 40000) {
       connectionPingCheckTime = millis();
       Serial.println("[x]: Sending Connection Ping");
-      String msg = "{\"type\":\"connectionping\", \"source\":\"" +
-                   NODE_FULL_NAME + "\", \"destination\" : \"" +
-                   NODE_DESTINATION + +"\"}";
-      mesh.sendSingle(form_gateway, msg);
+      String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
+                   "\", \"destination\" : \"" + DATA_GATEWAY + +"\"}";
+      mesh.sendSingle(DATA_GATEWAY, msg);
       connectionPingRTOChecker = millis();
       isWaitingForConnectionPingResponse = true;
     }
