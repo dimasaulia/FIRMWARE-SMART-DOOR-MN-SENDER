@@ -322,10 +322,12 @@ void setup() {
 long id = 0;
 int reading = 100;
 void loop() {
+  // Reset Mesh Credential
   reading = touchRead(TOUCH_RESET_PIN);
   if (reading < 20) {
     meshReset();
   }
+
   if (isConnectionReady) {
     mesh.update();
     // MENGIRIM PESAN SETIAP 10 DETIK
@@ -354,8 +356,8 @@ void loop() {
     //   Serial.println("[x]: Waiting...");
     // }
 
-    // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama pintu
-    // bisa
+    // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama perintah
+    // untuk membuka pintu
     if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
       // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
       // Relay Menyala Untuk Membuka Pintu
