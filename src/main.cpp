@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <MFRC522.h>
+// #include <SPI.h>
 #include <WiFi.h>
 #include <namedMesh.h>
 
@@ -19,6 +21,7 @@ String DATA_SSID; // Variables to save values from HTML form
 String DATA_PASSWORD;
 String DATA_GATEWAY;
 String DATA_NODE;
+String cardIdContainer;
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
 boolean isWaitingForConnectionPingResponse = false;
@@ -26,14 +29,20 @@ boolean isConnectionReady = false;
 boolean isResponseDestinationCorrect = false;
 boolean isGatewayAvailable = false;
 boolean isDoorOpen = false;
+boolean isCardExist = false;
+boolean isDeviceAllowToSendAuth = false;
 boolean APStatus = false;
 unsigned long connectionStartupCheckTime = 0;
 unsigned long connectionStartupRTOChecker = 0;
 unsigned long connectionPingCheckTime = 0;
 unsigned long connectionPingRTOChecker = 0;
 unsigned long authCheckTime = 0;
+unsigned long rfidScanTime = 0;
 unsigned long authRTOChecker = 0;
 unsigned long doorTimestamp = 0;
+unsigned long bootTimestamp = 0;
+const short RFID_RST = 4;
+const short RFID_SS = 15;
 const char *PARAM_INPUT_1 = "ssid"; // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_2 = "password";
 const char *PARAM_INPUT_3 = "node";
@@ -53,6 +62,7 @@ AsyncWebServer server(80); // Create AsyncWebServer object on port 80
 IPAddress localIP;         // Set IP address
 IPAddress localGateway;
 IPAddress subnet(255, 255, 0, 0);
+MFRC522 rfid(RFID_SS, RFID_RST);
 
 // Initialize SPIFFS
 void initSPIFFS() {
@@ -120,9 +130,12 @@ void meshReset() {
 
 void setup() {
   Serial.begin(115200);
+  bootTimestamp = millis();
+
+  // Start Instance
   initSPIFFS();
 
-  // Pin Controll
+  // Pin Control
   pinMode(LED, OUTPUT);
   digitalWrite(LED, LOW);
 
@@ -213,14 +226,14 @@ void setup() {
 
   if (meshStatus() == true && APStatus == false) {
     Serial.println("Trying to connect to esp mesh");
-    mesh.setDebugMsgTypes(ERROR | STARTUP);
+    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
     mesh.init(DATA_SSID, DATA_PASSWORD, &userScheduler, MESH_PORT);
     mesh.setName(DATA_NODE);
 
     mesh.onReceive([](String &from, String &msg) {
       digitalWrite(LED, HIGH);
-      // Serial.printf("[i]: Get Response From Gateway: %s. %s\n", from.c_str(),
-      //               msg.c_str());
+      Serial.printf("[i]: Get Response From Gateway: %s. %s\n", from.c_str(),
+                    msg.c_str());
 
       // Pastikan Data Yang Diterima Memang Ditujukan Untuk Node Ini, Ubah Data
       // menjadi JSON Terlebih dahulu
@@ -264,14 +277,23 @@ void setup() {
         isDoorOpen = true;
       }
 
+      if (isWaitingForAuthResponse && isResponseDestinationCorrect &&
+          doc["success"] == false && type == "auth") {
+        isWaitingForAuthResponse = false;     // reset value
+        isResponseDestinationCorrect = false; // reset value
+        isDoorOpen = false;
+        Serial.println("Failed To Open Room");
+      }
+
       // INFO: Jika response yang diterima adalah "connectionstartup"
       if (isWaitingForConnectionStartupResponse &&
           isResponseDestinationCorrect && doc["success"] == true &&
           type == "connectionstartup") {
         unsigned long waitingTime = millis() - connectionStartupRTOChecker;
-        Serial.println("[x]: Connection Ready in " + String(waitingTime) +
+        Serial.println("[x]: Connection Ready in " +
+                       String(millis() - bootTimestamp) + " ms");
+        Serial.println("[x]: Connestion Latency " + String(waitingTime) +
                        " ms");
-        Serial.println("[x]: Device Ready");
         isWaitingForConnectionStartupResponse = false; // reset value
         isResponseDestinationCorrect = false;          // reset value
         isConnectionReady = true;  // allow device to operate
@@ -301,7 +323,6 @@ void setup() {
   }
 
   // When First Start Up try to connect to gateway
-
   while (isConnectionReady == false && APStatus == false) {
     mesh.update();
     // MENGIRIM PESAN SETIAP 5 DETIK
@@ -317,32 +338,70 @@ void setup() {
       isWaitingForConnectionStartupResponse = true;
     }
   }
+
+  Serial.println("[x]: Waking Up RFID Reader");
+  delay(5000);
+  SPI.begin();
+  rfid.PCD_Init();
+  Serial.println("[x]: Device Ready");
 }
 
 long id = 0;
 int reading = 100;
 void loop() {
-  // Reset Mesh Credential
-  reading = touchRead(TOUCH_RESET_PIN);
-  if (reading < 20) {
-    meshReset();
+  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
+    cardIdContainer = "";
+    for (byte i = 0; i < rfid.uid.size; i++) {
+      cardIdContainer.concat(String(rfid.uid.uidByte[i] < 0x10 ? " 0" : ""));
+      cardIdContainer.concat(String(rfid.uid.uidByte[i], HEX));
+    }
+    Serial.print("[x]: CARD ID ");
+    Serial.println(cardIdContainer);
+    // Jika Waktu Menempel kartu masih kurang dari dua detik dari kartu terakhir
+    // yang di tempelkan maka jangan ijinkan mengirim data
+    if (rfidScanTime != 0 && millis() - rfidScanTime < 2000) {
+      Serial.println("[x]: Device Cant Send Request");
+      isDeviceAllowToSendAuth = false;
+    } else {
+      isCardExist = true;
+      isDeviceAllowToSendAuth = true;
+      rfidScanTime = millis();
+      Serial.println("[x]: Device Can Send Request");
+    }
   }
 
   if (isConnectionReady) {
     mesh.update();
     // MENGIRIM PESAN SETIAP 10 DETIK
     uint64_t now = millis();
-    if (now - authCheckTime > 15000) {
+    // if (now - authCheckTime > 15000) {
+    //   String msg = "{\"msgid\" : \"" + String(id) +
+    //                "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
+    //                "\",\"destination\" : \"" + DATA_GATEWAY +
+    //                "\",\"card\": "
+    //                "{\"id\" : \"4448c29FeAF0\",\"pin\" : \"123456\"}}";
+    //   authCheckTime = millis();
+    //   authRTOChecker = millis(); // 10
+    //   Serial.println("[i]: Sending Request To Gateway");
+    //   mesh.sendSingle(DATA_GATEWAY, msg);
+    //   isWaitingForAuthResponse = true;
+    //   id++;
+    // }
+
+    if (isCardExist && isDeviceAllowToSendAuth) {
       String msg = "{\"msgid\" : \"" + String(id) +
                    "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
-                   "{\"id\" : \"4448c29FeAF0\",\"pin\" : \"123456\"}}";
+                   "{\"id\" : \"" +
+                   cardIdContainer + "\",\"pin\" : \"123456\"}}";
       authCheckTime = millis();
-      authRTOChecker = millis(); // 10
+      authRTOChecker = millis();
       Serial.println("[i]: Sending Request To Gateway");
       mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForAuthResponse = true;
+      isCardExist = false;
+      cardIdContainer = "";
       id++;
     }
 
@@ -371,7 +430,7 @@ void loop() {
     }
 
     // INFO: Ketersediaan Gateway
-    // Lakukan ping setiap 120 detik untuk melihat ketersediaan gateway
+    // Lakukan ping setiap 40 detik untuk melihat ketersediaan gateway
     if (now - connectionPingCheckTime > 40000) {
       connectionPingCheckTime = millis();
       Serial.println("[x]: Sending Connection Ping");
