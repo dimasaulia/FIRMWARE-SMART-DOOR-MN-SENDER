@@ -1,0 +1,1 @@
+#define DEVICE_SEC_PIN "869015"

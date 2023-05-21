@@ -4,24 +4,31 @@
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <Key.h>
+#include <Keypad.h>
+#include <Keypad_I2C.h>
 #include <MFRC522.h>
-// #include <SPI.h>
+#include <SPI.h>
 #include <WiFi.h>
+#include <Wire.h>
 #include <namedMesh.h>
+#include <secret.h>
 
 #define MESH_SSID "smartdoornetwork"
 #define MESH_PASSWORD "t4np454nd1"
 #define LED 2
 #define MESH_PORT 5555
-// #define RTO_LIMIT 10000         // 10s
 #define RTO_LIMIT 8000          // 8s
 #define DOOR_OPEN_DURATION 5000 // 5s
+#define I2C_KEYPAD_ADDR 0x38
 
 String DATA_SSID; // Variables to save values from HTML form
 String DATA_PASSWORD;
 String DATA_GATEWAY;
+String DEVICE_MODE = "AUTH"; // or ADMIN
 String DATA_NODE;
 String cardIdContainer;
+String pinContainer;
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
 boolean isWaitingForConnectionPingResponse = false;
@@ -32,6 +39,7 @@ boolean isDoorOpen = false;
 boolean isCardExist = false;
 boolean isDeviceAllowToSendAuth = false;
 boolean APStatus = false;
+boolean changeMode = false;
 unsigned long connectionStartupCheckTime = 0;
 unsigned long connectionStartupRTOChecker = 0;
 unsigned long connectionPingCheckTime = 0;
@@ -48,6 +56,15 @@ const char *PARAM_INPUT_2 = "password";
 const char *PARAM_INPUT_3 = "node";
 const char *PARAM_INPUT_4 = "gateway";
 const int TOUCH_RESET_PIN = 4;
+const byte ROWS = 4;
+const byte COLS = 4;
+char keys[ROWS][COLS] = {
+    // Flat Keypad
+    {'D', 'C', 'B', 'A'},
+    {'#', '9', '6', '3'},
+    {'0', '8', '5', '2'},
+    {'*', '7', '4', '1'},
+};
 
 // File paths to save input values permanentlys
 const char *nodePath = "/node.txt";
@@ -63,6 +80,10 @@ IPAddress localIP;         // Set IP address
 IPAddress localGateway;
 IPAddress subnet(255, 255, 0, 0);
 MFRC522 rfid(RFID_SS, RFID_RST);
+byte rowPins[ROWS] = {0, 1, 2, 3};
+byte colPins[COLS] = {4, 5, 6, 7};
+Keypad_I2C keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS,
+                  I2C_KEYPAD_ADDR, PCF8574);
 
 // Initialize SPIFFS
 void initSPIFFS() {
@@ -154,25 +175,23 @@ void setup() {
   Serial.println(DATA_GATEWAY);
 
   if (meshStatus() == false) {
-    // if (true) {
     // Connect to ESP Mesh network with SSID and password
     APStatus = true;
     Serial.println("[x]: Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("[x]: ESP-MESH-MANAGER", NULL);
+    WiFi.softAP("ESP-MESH-MANAGER", NULL);
 
     IPAddress IP = WiFi.softAPIP();
     Serial.print("[x]: AP IP address: ");
     Serial.println(IP);
 
     // Web Server Root URL
-    // server.serveStatic("/", SPIFFS, "/");
+    server.serveStatic("/", SPIFFS, "/");
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send(SPIFFS, "/index.html", "text/html");
     });
 
     // Handling POST Request
-
     server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
       int params = request->params();
       for (int i = 0; i < params; i++) {
@@ -335,17 +354,22 @@ void setup() {
     }
   }
 
-  Serial.println("[x]: Waking Up RFID Reader");
-  delay(1000);
-  SPI.begin();
-  rfid.PCD_Init();
-  Serial.println("[x]: Device Ready");
+  if (isConnectionReady && APStatus == false) {
+    Serial.println("[x]: Waking Up I2C & Keypad");
+    Wire.begin();
+    keypad.begin(makeKeymap(keys));
+    Serial.println("[x]: Waking Up RFID Reader");
+    delay(1000);
+    SPI.begin();
+    rfid.PCD_Init();
+    Serial.println("[x]: Device Ready");
+  }
 }
 
 long id = 0;
 int reading = 100;
 void loop() {
-
+  // INFO: RFID
   if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
     cardIdContainer = "";
     for (byte i = 0; i < rfid.uid.size; i++) {
@@ -368,26 +392,100 @@ void loop() {
     }
   }
 
+  // INFO: CONNECTION
   if (isConnectionReady) {
     mesh.update();
+
+    // INFO: KEYPAD
+    char key = keypad.getKey(); // get keypad value
+
+    // Storing keypad value to variable
+    if (key) {
+      if (key != 'A' && key != 'B' && key != 'C' && key != 'D' && key != '*' &&
+          key != '#') {
+        if (pinContainer.length() < 6) {
+          pinContainer += key;
+        }
+        Serial.printf("Current Pin: %s\n", pinContainer);
+      }
+    }
+
+    // Clearing Pin Container
+    if (key == 'C') {
+      pinContainer = "";
+      isCardExist = false;
+      cardIdContainer = "";
+      Serial.println("[x]: Clearing All Stored Data");
+    }
+
+    // Changing Mode
+    if (key == '#') {
+      pinContainer = "";
+      cardIdContainer = "";
+      isCardExist = false;
+      if (changeMode == false) {
+        changeMode = true;
+        Serial.println("[x]: Change Mode True");
+      } else {
+        changeMode = false;
+        Serial.println("[x]: Change Mode False");
+      }
+    }
+
+    // Authenticate To Change Device Mode
+    if (key == 'D' && changeMode) {
+      if (pinContainer == DEVICE_SEC_PIN) {
+        if (DEVICE_MODE == "AUTH") {
+          DEVICE_MODE = "ADMIN";
+        } else {
+          DEVICE_MODE = "AUTH";
+        }
+
+        Serial.printf("[x]: Success Changing Mode to %s\n", DEVICE_MODE);
+      }
+
+      if (pinContainer != DEVICE_SEC_PIN) {
+        Serial.println("[x]: Failed to success Changing Mode");
+      }
+
+      isCardExist = false;
+      cardIdContainer = "";
+      pinContainer = "";
+    }
+
+    // Reset Device Setting
+    if (key == 'B' && DEVICE_MODE == "ADMIN") {
+      Serial.println("[x]: Reset Device Setting");
+      meshReset();
+    }
+
+    // If Reset  failed
+    if (key == 'B' && DEVICE_MODE != "ADMIN") {
+      Serial.println("[x]: Can't reset device setting, operation only can be "
+                     "performed by ADMIN");
+    }
+
     // MENGIRIM PESAN SETIAP 10 DETIK
     uint64_t now = millis();
 
-    if (isCardExist && isDeviceAllowToSendAuth) {
+    if (isCardExist && isDeviceAllowToSendAuth && DEVICE_MODE == "AUTH") {
       String msg = "{\"msgid\" : \"" + String(id) +
                    "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
                    "{\"id\" : \"" +
-                   cardIdContainer + "\",\"pin\" : \"123456\"}}";
+                   cardIdContainer + "\",\"pin\" : \"" + pinContainer + "\"}}";
       authCheckTime = millis();
       authRTOChecker = millis();
       Serial.println("[i]: Sending Request To Gateway");
       Serial.printf("[x]: CARD ID %s\n", cardIdContainer);
+      Serial.printf("[x]: CARD PIN %s\n", pinContainer);
       mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForAuthResponse = true;
+      Serial.println("[x]: Clearing All Stored Data");
       isCardExist = false;
       cardIdContainer = "";
+      pinContainer = "";
       id++;
     }
 
