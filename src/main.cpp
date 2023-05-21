@@ -1,6 +1,8 @@
 #include <Arduino.h>
 //
 #include "SPIFFS.h"
+#include <Adafruit_GFX.h> // Core graphics library
+#include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
@@ -18,9 +20,11 @@
 #define MESH_PASSWORD "t4np454nd1"
 #define LED 2
 #define MESH_PORT 5555
-#define RTO_LIMIT 8000          // 8s
-#define DOOR_OPEN_DURATION 5000 // 5s
+#define RTO_LIMIT 8000           // 8s
+#define DISPLAT_ALERT_LIMIT 2000 // 2s
+#define DOOR_OPEN_DURATION 5000  // 5s
 #define I2C_KEYPAD_ADDR 0x38
+#define I2C_LCD_ADDR 0x3C
 #define TOUCH 33
 #define RELAY 27
 #define LED_GATEWAY 32
@@ -34,15 +38,21 @@ String DEVICE_MODE = "AUTH"; // or ADMIN
 String DATA_NODE;
 String cardIdContainer;
 String pinContainer;
+String authResponsesTimeContainer = "";
+String successPingResponsesTimeContainer = "";
+String joinConnectionResponsesTimeContainer = "";
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
 boolean isWaitingForConnectionPingResponse = false;
+boolean isCheckingConnection = false;
 boolean isConnectionReady = false;
 boolean isResponseDestinationCorrect = false;
 boolean isGatewayAvailable = false;
 boolean isDoorOpen = false;
 boolean isCardExist = false;
 boolean isDeviceAllowToSendAuth = false;
+boolean isDisplayShowAlert = false;
+boolean isDisplayShowAlertHaveLimit = false;
 boolean APStatus = false;
 boolean changeMode = false;
 unsigned long connectionStartupCheckTime = 0;
@@ -54,6 +64,7 @@ unsigned long rfidScanTime = 0;
 unsigned long authRTOChecker = 0;
 unsigned long doorTimestamp = 0;
 unsigned long bootTimestamp = 0;
+unsigned long alertTimestamp = 0;
 const short RFID_RST = 4;
 const short RFID_SS = 15;
 const char *PARAM_INPUT_1 = "ssid"; // Search for parameter in HTTP POST request
@@ -61,6 +72,8 @@ const char *PARAM_INPUT_2 = "password";
 const char *PARAM_INPUT_3 = "node";
 const char *PARAM_INPUT_4 = "gateway";
 const int TOUCH_RESET_PIN = 4;
+const byte DISPLAY_WIDTH = 128;
+const byte DISPLAY_HEIGHT = 64;
 const byte ROWS = 4;
 const byte COLS = 4;
 char keys[ROWS][COLS] = {
@@ -70,7 +83,7 @@ char keys[ROWS][COLS] = {
     {'0', '8', '5', '2'},
     {'*', '7', '4', '1'},
 };
-
+short responseCounter = 0;
 // File paths to save input values permanentlys
 const char *nodePath = "/node.txt";
 const char *ssidPath = "/ssid.txt";
@@ -89,6 +102,7 @@ byte rowPins[ROWS] = {0, 1, 2, 3};
 byte colPins[COLS] = {4, 5, 6, 7};
 Keypad_I2C keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS,
                   I2C_KEYPAD_ADDR, PCF8574);
+Adafruit_SSD1306 display(DISPLAY_WIDTH, DISPLAY_HEIGHT, &Wire, -1);
 
 // Initialize SPIFFS
 void initSPIFFS() {
@@ -154,12 +168,174 @@ void meshReset() {
   ESP.restart();
 }
 
+// Check gateway connection
+void meshCheckConnection() {
+  connectionPingCheckTime = millis();
+  Serial.println("[x]: Sending Connection Ping");
+  String msg = "";
+  if (joinConnectionResponsesTimeContainer != "") {
+    msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
+          "\", \"destination\" : \"" + DATA_GATEWAY + +"\",\"auth\":\"" +
+          authResponsesTimeContainer + "\",\"startupconnection\":\"" +
+          joinConnectionResponsesTimeContainer + "\"}";
+  }
+  if (joinConnectionResponsesTimeContainer == "") {
+    msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
+          "\", \"destination\" : \"" + DATA_GATEWAY + +"\",\"auth\":\"" +
+          authResponsesTimeContainer + "\"}";
+  }
+  mesh.sendSingle(DATA_GATEWAY, msg);
+  connectionPingRTOChecker = millis();
+  isWaitingForConnectionPingResponse = true;
+  authResponsesTimeContainer = ""; // reset container
+  successPingResponsesTimeContainer = "";
+  joinConnectionResponsesTimeContainer = "";
+}
+
+// INFO: Display Handler
+void centerText(byte yLevel, byte fontSize, String text) {
+  short textLength = text.length();
+  byte marginTop = 5;
+  byte yPos = 3;
+  short xPos = ((DISPLAY_WIDTH - (textLength * fontSize * 5)) / 2) - 7;
+  if (fontSize == 1) {
+    marginTop = 10;
+  }
+  switch (yLevel) {
+  case 1:
+    yPos = 3;
+    break;
+
+  case 2:
+    // 3 is starting y position, + font size + margin
+    yPos = 3 + (fontSize * 7) + marginTop;
+    break;
+
+  case 3:
+    // 3 is starting y position, + font size + margin
+    yPos = 3 + (fontSize * 7) + marginTop + (fontSize * 7) + marginTop;
+    break;
+
+  default:
+    yPos = 3;
+    break;
+  }
+  display.setTextSize(fontSize);
+  display.setCursor(xPos, yPos);
+  display.print(text);
+  // Serial.printf("Text: %s, X: %s, Y: %s", text, xPos, yPos);
+}
+
+void leftText(byte yLevel, byte fontSize, String text) {
+  short textLength = text.length();
+  byte yPos = 3;
+  byte xPos = 5;
+  byte marginTop = 5;
+  if (fontSize == 1) {
+    marginTop = 10;
+  }
+  yPos = 3 + (((fontSize * 7) + marginTop) * (yLevel - 1));
+
+  display.setTextSize(fontSize);
+  display.setCursor(xPos, yPos);
+  display.print(text);
+}
+
+void alert(String text) {
+  display.clearDisplay();
+  display.fillScreen(WHITE);
+  display.setTextColor(BLACK);
+  display.setTextSize(2);
+  display.setTextWrap(true);
+  display.setCursor(10, 10);
+  display.println(text);
+  display.display();
+}
+
+void displaySetUpText() {
+  display.clearDisplay();
+  display.setTextWrap(false);
+  display.setTextColor(WHITE);
+  centerText(1, 2, "WELCOME");
+  centerText(2, 2, "SMART DOOR");
+  centerText(3, 2, "SYSTEM");
+  display.display();
+}
+
+void displayAPMode(String ip) {
+  display.clearDisplay();
+  display.setTextWrap(false);
+  display.setTextColor(WHITE);
+  centerText(1, 2, "AP MODE");
+  leftText(3, 1, "ESP-MESH-MANAGER");
+  leftText(4, 1, ip);
+  display.display();
+}
+
+void displayWaitingConnection() {
+  display.clearDisplay();
+  display.setTextWrap(false);
+  display.setTextColor(WHITE);
+  centerText(1, 2, "TRY TO");
+  centerText(2, 2, "CONN w/");
+  centerText(3, 2, "GATEWAY");
+  display.display();
+}
+
+void displayWritePin(String pin) {
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(2);
+  display.setTextWrap(false);
+  if (changeMode) { // when device try to change mode
+    centerText(1, 2, "ADMIN AUTH");
+    display.setCursor(20, 50);
+    display.setTextSize(1);
+    display.println("ENTER ROOM PIN");
+  }
+
+  if (!changeMode && DEVICE_MODE == "AUTH") { // when device in auth mode
+    centerText(1, 2, "SMART DOOR");
+    display.setCursor(25, 50);
+    display.setTextSize(1);
+    display.println("TAP YOUR CARD");
+  }
+
+  if (!changeMode && DEVICE_MODE == "ADMIN") { // when device in ADMIN mode
+    centerText(1, 2, "ADMIN MODE");
+    leftText(2, 1, "ID: " + DATA_NODE);
+    leftText(3, 1, "B: Reset Mesh");
+    leftText(4, 1, "#: Admin Auth");
+  }
+
+  if ((!changeMode && DEVICE_MODE == "AUTH") || changeMode)
+    if (pin.length() == 0) {
+      centerText(2, 2, "------");
+    } else {
+      String text = "";
+      for (size_t i = 0; i < pin.length(); i++) {
+        text += "*";
+      }
+
+      for (size_t i = 0; i < (6 - (pin.length())); i++) {
+        text += "-";
+      }
+      centerText(2, 2, text);
+    }
+
+  display.display();
+}
+
 void setup() {
   Serial.begin(115200);
   bootTimestamp = millis();
 
   // Start Instance
   initSPIFFS();
+  Wire.begin();
+  display.begin(SSD1306_SWITCHCAPVCC, I2C_LCD_ADDR);
+  display.setRotation(0);
+  displaySetUpText();
 
   // Pin Control
   pinMode(LED, OUTPUT);
@@ -191,8 +367,14 @@ void setup() {
     WiFi.softAP("ESP-MESH-MANAGER", NULL);
 
     IPAddress IP = WiFi.softAPIP();
+    String ip = "";
+    for (int i = 0; i < 4; i++) {
+      ip += i ? "." + String(IP[i]) : String(IP[i]);
+    }
+
+    displayAPMode(ip);
     Serial.print("[x]: AP IP address: ");
-    Serial.println(IP);
+    Serial.println(ip);
 
     // Web Server Root URL
     server.serveStatic("/", SPIFFS, "/");
@@ -263,7 +445,7 @@ void setup() {
 
       // Pastikan Data Yang Diterima Memang Ditujukan Untuk Node Ini, Ubah Data
       // menjadi JSON Terlebih dahulu
-      StaticJsonDocument<200> doc;
+      StaticJsonDocument<256> doc;
       DeserializationError error = deserializeJson(doc, msg.c_str());
       if (error) {
         Serial.println("[e]: Failed to deserializeJson");
@@ -291,16 +473,23 @@ void setup() {
       // Melihat response apakah pintu bisa dibuka
       if (isWaitingForAuthResponse && isResponseDestinationCorrect &&
           doc["success"] == true && type == "auth") {
+        doorTimestamp = millis();
         unsigned long arrivalTime = millis();
         unsigned long waitingTime = arrivalTime - authRTOChecker;
+        String waitingTimeStr = String(waitingTime);
         Serial.println("[i]: Auth request start on " + String(authRTOChecker) +
                        " receive response on " + String(arrivalTime) +
                        " final response time " + String(waitingTime));
-        doorTimestamp = millis();
         Serial.println("[i]: Sukses Membuka Pintu");
+        // if (responseCounter < 6) {
+        //   authResponsesTimeContainer += waitingTimeStr + ",";
+        // }
+        authResponsesTimeContainer += waitingTimeStr + ",";
+        responseCounter += 1;
         isWaitingForAuthResponse = false;     // reset value
         isResponseDestinationCorrect = false; // reset value
         isDoorOpen = true;
+        isWaitingForAuthResponse = false; // cleare alert
       }
 
       if (isWaitingForAuthResponse && isResponseDestinationCorrect &&
@@ -309,6 +498,14 @@ void setup() {
         isResponseDestinationCorrect = false; // reset value
         isDoorOpen = false;
         Serial.println("[x]: Failed To Open Room");
+        alert("FAILED\n OPEN\n ROOM");
+        isDisplayShowAlert = true;
+        isDisplayShowAlertHaveLimit = true;
+        String waitingTimeStr = String(millis() - authRTOChecker);
+        authResponsesTimeContainer += waitingTimeStr + ",";
+        isDoorOpen = false; // jika sistem ingin langsung mengunci pintu jika
+                            // kartu tidak valid
+        alertTimestamp = millis(); // prepare to reset display
       }
 
       // INFO: Jika response yang diterima adalah "connectionstartup"
@@ -320,10 +517,11 @@ void setup() {
                        String(millis() - bootTimestamp) + " ms");
         Serial.println("[x]: Connestion Latency " + String(waitingTime) +
                        " ms");
+        String waitingTimeStr = String(millis() - bootTimestamp);
+        joinConnectionResponsesTimeContainer += waitingTimeStr + ",";
         isWaitingForConnectionStartupResponse = false; // reset value
         isResponseDestinationCorrect = false;          // reset value
-        isConnectionReady = true;  // allow device to operate
-        isGatewayAvailable = true; // alllow user to tap their card
+        isConnectionReady = true; // allow device to operate
         digitalWrite(LED_GATEWAY, HIGH);
       }
 
@@ -336,6 +534,9 @@ void setup() {
                        String(connectionPingRTOChecker) + " receive reply on " +
                        String(arrivalTime) + " final response time " +
                        String(waitingTime));
+        String waitingTimeStr = String(waitingTime);
+        successPingResponsesTimeContainer += waitingTimeStr + ",";
+        isGatewayAvailable = true; // alllow user to tap their card
         isWaitingForConnectionPingResponse = false; // reset value
         isResponseDestinationCorrect = false;       // reset value
         digitalWrite(LED_GATEWAY, HIGH);
@@ -362,12 +563,14 @@ void setup() {
       connectionStartupRTOChecker = millis();
       mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForConnectionStartupResponse = true;
+      if (now > bootTimestamp + 5000) {
+        displayWaitingConnection();
+      }
     }
   }
 
   if (isConnectionReady && APStatus == false) {
     Serial.println("[x]: Waking Up I2C & Keypad");
-    Wire.begin();
     keypad.begin(makeKeymap(keys));
     Serial.println("[x]: Waking Up RFID Reader");
     delay(1000);
@@ -443,6 +646,15 @@ void loop() {
       }
     }
 
+    // Check Gateway Connection
+    if (key == '*') {
+      meshCheckConnection();
+      alert("CHECK\n GATEWAY\n CONN..");
+      alertTimestamp = millis();
+      isDisplayShowAlert = true;
+      isCheckingConnection = true;
+    }
+
     // Authenticate To Change Device Mode
     if (key == 'D' && changeMode) {
       if (pinContainer == DEVICE_SEC_PIN) {
@@ -451,12 +663,16 @@ void loop() {
         } else {
           DEVICE_MODE = "AUTH";
         }
-
+        changeMode = false;
         Serial.printf("[x]: Success Changing Mode to %s\n", DEVICE_MODE);
       }
 
       if (pinContainer != DEVICE_SEC_PIN) {
         Serial.println("[x]: Failed to success Changing Mode");
+        alert("FAILED\n TO CHANGE\n MODE");
+        isDisplayShowAlert = true;
+        isDisplayShowAlertHaveLimit = true;
+        alertTimestamp = millis(); // prepare to reset display
       }
 
       isCardExist = false;
@@ -499,11 +715,17 @@ void loop() {
       cardIdContainer = "";
       pinContainer = "";
       id++;
+      alert(" \n LOADING\n ");
+      isDisplayShowAlert = true;
     }
 
     if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
       Serial.println("[i]: AUTH RTO");
       isWaitingForAuthResponse = false;
+      alert("AUTH\n RTO\n ");
+      alertTimestamp = millis(); // prepare to reset display
+      isDisplayShowAlert = true;
+      isDisplayShowAlertHaveLimit = true;
     }
 
     // if (isWaitingForAuthResponse) {
@@ -511,32 +733,45 @@ void loop() {
     //   Serial.println("[x]: Waiting...");
     // }
 
+    // INFO: magnetic lock handler
     // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama perintah
     // untuk membuka pintu
     if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
       // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
       // Relay Menyala Untuk Membuka Pintu
       digitalWrite(RELAY, HIGH);
+      alert("SUCCESS\n OPEN \n ROOM");
+      isDisplayShowAlert = true;
     }
 
     // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
     if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
       // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
       // Relay Mati Pintu, Kembali terkunci
+      digitalWrite(RELAY, LOW);
       isDoorOpen = false;
+      isDisplayShowAlert = false;
+    }
+
+    if (isDoorOpen == false) {
       digitalWrite(RELAY, LOW);
     }
 
+    // INFO: Display Handler
+    if (isDisplayShowAlert == false) {
+      displayWritePin(pinContainer);
+    }
+
+    if (millis() > alertTimestamp + DISPLAT_ALERT_LIMIT &&
+        isDisplayShowAlertHaveLimit == true) {
+      isDisplayShowAlert = false;
+      isDisplayShowAlertHaveLimit = false;
+    }
+
     // INFO: Ketersediaan Gateway
-    // Lakukan ping setiap 20 detik untuk melihat ketersediaan gateway
-    if (now - connectionPingCheckTime > 20000) {
-      connectionPingCheckTime = millis();
-      Serial.println("[x]: Sending Connection Ping");
-      String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
-                   "\", \"destination\" : \"" + DATA_GATEWAY + +"\"}";
-      mesh.sendSingle(DATA_GATEWAY, msg);
-      connectionPingRTOChecker = millis();
-      isWaitingForConnectionPingResponse = true;
+    // Lakukan ping setiap 60 detik untuk melihat ketersediaan gateway
+    if (now - connectionPingCheckTime > 60000) {
+      meshCheckConnection();
     }
 
     // Jika Ping tidak berbalas
@@ -544,7 +779,27 @@ void loop() {
         millis() - connectionPingRTOChecker > RTO_LIMIT) {
       Serial.println("[x]: PING RTO");
       isWaitingForConnectionPingResponse = false;
+      isGatewayAvailable = false; // reset gateway response
       digitalWrite(LED_GATEWAY, LOW);
+      if (isCheckingConnection) {
+        alert("GATEWAY\n NOT\n AVAILABLE");
+        alertTimestamp = millis();
+        isDisplayShowAlert = true;
+        isDisplayShowAlertHaveLimit = true;
+        isCheckingConnection = false;
+      }
+    }
+
+    // Jika User Sedang Memeriksa Konksi dan berhasil
+    if (isCheckingConnection && isGatewayAvailable) {
+      digitalWrite(LED_GATEWAY, HIGH);
+      alert("GATEWAY\n AVAILABLE\n ");
+      alertTimestamp = millis();
+      isDisplayShowAlert = true;
+      isDisplayShowAlertHaveLimit = true;
+      isWaitingForConnectionPingResponse = false;
+      isCheckingConnection = false;
+      isGatewayAvailable = false; // reset gateway response
     }
   }
 }
