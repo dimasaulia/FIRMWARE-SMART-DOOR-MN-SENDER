@@ -21,6 +21,11 @@
 #define RTO_LIMIT 8000          // 8s
 #define DOOR_OPEN_DURATION 5000 // 5s
 #define I2C_KEYPAD_ADDR 0x38
+#define TOUCH 33
+#define RELAY 27
+#define LED_GATEWAY 32
+// #define LED_TX 16
+// #define LED_RX 17
 
 String DATA_SSID; // Variables to save values from HTML form
 String DATA_PASSWORD;
@@ -158,7 +163,11 @@ void setup() {
 
   // Pin Control
   pinMode(LED, OUTPUT);
+  pinMode(RELAY, OUTPUT);
+  pinMode(LED_GATEWAY, OUTPUT);
   digitalWrite(LED, LOW);
+  digitalWrite(RELAY, LOW);
+  digitalWrite(LED_GATEWAY, LOW);
 
   // read variable
   DATA_SSID = readFile(SPIFFS, ssidPath);
@@ -315,6 +324,7 @@ void setup() {
         isResponseDestinationCorrect = false;          // reset value
         isConnectionReady = true;  // allow device to operate
         isGatewayAvailable = true; // alllow user to tap their card
+        digitalWrite(LED_GATEWAY, HIGH);
       }
 
       // INFO: Jika response yang diterima adalah "connectionping"
@@ -328,6 +338,7 @@ void setup() {
                        String(waitingTime));
         isWaitingForConnectionPingResponse = false; // reset value
         isResponseDestinationCorrect = false;       // reset value
+        digitalWrite(LED_GATEWAY, HIGH);
         Serial.println("[x]: Gateway Still Available");
       }
       digitalWrite(LED, LOW);
@@ -468,7 +479,8 @@ void loop() {
     // MENGIRIM PESAN SETIAP 10 DETIK
     uint64_t now = millis();
 
-    if (isCardExist && isDeviceAllowToSendAuth && DEVICE_MODE == "AUTH") {
+    if (isCardExist && isDeviceAllowToSendAuth && DEVICE_MODE == "AUTH" &&
+        changeMode == false) {
       String msg = "{\"msgid\" : \"" + String(id) +
                    "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
@@ -504,6 +516,7 @@ void loop() {
     if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
       // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
       // Relay Menyala Untuk Membuka Pintu
+      digitalWrite(RELAY, HIGH);
     }
 
     // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
@@ -511,11 +524,12 @@ void loop() {
       // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
       // Relay Mati Pintu, Kembali terkunci
       isDoorOpen = false;
+      digitalWrite(RELAY, LOW);
     }
 
     // INFO: Ketersediaan Gateway
-    // Lakukan ping setiap 40 detik untuk melihat ketersediaan gateway
-    if (now - connectionPingCheckTime > 40000) {
+    // Lakukan ping setiap 20 detik untuk melihat ketersediaan gateway
+    if (now - connectionPingCheckTime > 20000) {
       connectionPingCheckTime = millis();
       Serial.println("[x]: Sending Connection Ping");
       String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
@@ -525,10 +539,12 @@ void loop() {
       isWaitingForConnectionPingResponse = true;
     }
 
+    // Jika Ping tidak berbalas
     if (isWaitingForConnectionPingResponse &&
         millis() - connectionPingRTOChecker > RTO_LIMIT) {
       Serial.println("[x]: PING RTO");
       isWaitingForConnectionPingResponse = false;
+      digitalWrite(LED_GATEWAY, LOW);
     }
   }
 }
