@@ -67,7 +67,7 @@ MFRC522 rfid(RFID_SS, RFID_RST);
 // Initialize SPIFFS
 void initSPIFFS() {
   if (!SPIFFS.begin(true)) {
-    Serial.println("[e]: An error has occurred while mounting SPIFFS");
+    Serial.println("[x]: An error has occurred while mounting SPIFFS");
   }
   Serial.println("[x]: SPIFFS mounted successfully");
 }
@@ -78,7 +78,7 @@ String readFile(fs::FS &fs, const char *path) {
 
   File file = fs.open(path);
   if (!file || file.isDirectory()) {
-    Serial.println("- failed to open file for reading");
+    Serial.println("[x]: failed to open file for reading");
     return String();
   }
 
@@ -92,17 +92,17 @@ String readFile(fs::FS &fs, const char *path) {
 
 // Write file to SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message) {
-  Serial.printf("Writing file: %s\r\n", path);
+  Serial.printf("[x]: Writing file: %s\r\n", path);
 
   File file = fs.open(path, FILE_WRITE);
   if (!file) {
-    Serial.println("- failed to open file for writing");
+    Serial.println("[x]: failed to open file for writing");
     return;
   }
   if (file.print(message)) {
-    Serial.println("- file written");
+    Serial.println("[x]: file written");
   } else {
-    Serial.println("- write failed");
+    Serial.println("[x]: write failed");
   }
 }
 
@@ -110,7 +110,7 @@ void writeFile(fs::FS &fs, const char *path, const char *message) {
 bool meshStatus() {
   if (DATA_SSID == "" || DATA_PASSWORD == "" || DATA_GATEWAY == "" ||
       DATA_NODE == "") {
-    Serial.println("[e]: Undefined SSID, Password, Gateway, Node Value.");
+    Serial.println("[x]: Undefined SSID, Password, Gateway, Node Value.");
     return false;
   }
   return true;
@@ -118,7 +118,7 @@ bool meshStatus() {
 
 // Reset Mesh Network
 void meshReset() {
-  Serial.println("Attempting To Reset ESP Mesh Network");
+  Serial.println("[x]: Attempting To Reset ESP Mesh Network");
   String empty = "";
   writeFile(SPIFFS, ssidPath, empty.c_str());
   writeFile(SPIFFS, passwordPath, empty.c_str());
@@ -144,25 +144,25 @@ void setup() {
   DATA_PASSWORD = readFile(SPIFFS, passwordPath);
   DATA_NODE = readFile(SPIFFS, nodePath);
   DATA_GATEWAY = readFile(SPIFFS, gatewayPath);
-  Serial.print("SSID: ");
+  Serial.print("[x]: SSID: ");
   Serial.println(DATA_SSID);
-  Serial.print("Password: ");
+  Serial.print("[x]: Password: ");
   Serial.println(DATA_PASSWORD);
-  Serial.print("Node: ");
+  Serial.print("[x]: Node: ");
   Serial.println(DATA_NODE);
-  Serial.print("Gateway: ");
+  Serial.print("[x]: Gateway: ");
   Serial.println(DATA_GATEWAY);
 
   if (meshStatus() == false) {
     // if (true) {
     // Connect to ESP Mesh network with SSID and password
     APStatus = true;
-    Serial.println("Setting AP (Access Point)");
+    Serial.println("[x]: Setting AP (Access Point)");
     // NULL sets an open Access Point
-    WiFi.softAP("ESP-MESH-MANAGER", NULL);
+    WiFi.softAP("[x]: ESP-MESH-MANAGER", NULL);
 
     IPAddress IP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
+    Serial.print("[x]: AP IP address: ");
     Serial.println(IP);
 
     // Web Server Root URL
@@ -181,7 +181,7 @@ void setup() {
           // HTTP POST ssid value
           if (p->name() == PARAM_INPUT_1) {
             DATA_SSID = p->value().c_str();
-            Serial.print("SSID set to: ");
+            Serial.print("[x]: SSID set to: ");
             Serial.println(DATA_SSID);
             // Write file to save value
             writeFile(SPIFFS, ssidPath, DATA_SSID.c_str());
@@ -189,7 +189,7 @@ void setup() {
           // HTTP POST password value
           if (p->name() == PARAM_INPUT_2) {
             DATA_PASSWORD = p->value().c_str();
-            Serial.print("Password set to: ");
+            Serial.print("[x]: Password set to: ");
             Serial.println(DATA_PASSWORD);
             // Write file to save value
             writeFile(SPIFFS, passwordPath, DATA_PASSWORD.c_str());
@@ -197,7 +197,7 @@ void setup() {
           // HTTP POST Node value
           if (p->name() == PARAM_INPUT_3) {
             DATA_NODE = p->value().c_str();
-            Serial.print("Node value set to: ");
+            Serial.print("[x]: Node value set to: ");
             Serial.println(DATA_NODE);
             // Write file to save value
             writeFile(SPIFFS, nodePath, DATA_NODE.c_str());
@@ -205,13 +205,11 @@ void setup() {
           // HTTP POST gateway value
           if (p->name() == PARAM_INPUT_4) {
             DATA_GATEWAY = p->value().c_str();
-            Serial.print("Gateway set to: ");
+            Serial.print("[x]: Gateway set to: ");
             Serial.println(DATA_GATEWAY);
             // Write file to save value
             writeFile(SPIFFS, gatewayPath, DATA_GATEWAY.c_str());
           }
-          // Serial.printf("POST[%s]: %s\n", p->name().c_str(),
-          // p->value().c_str());
         }
       }
       request->send(200, "text/plain",
@@ -225,7 +223,7 @@ void setup() {
   }
 
   if (meshStatus() == true && APStatus == false) {
-    Serial.println("Trying to connect to esp mesh");
+    Serial.println("[x]: Trying to connect to esp mesh");
     mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
     mesh.init(DATA_SSID, DATA_PASSWORD, &userScheduler, MESH_PORT);
     mesh.setName(DATA_NODE);
@@ -282,7 +280,7 @@ void setup() {
         isWaitingForAuthResponse = false;     // reset value
         isResponseDestinationCorrect = false; // reset value
         isDoorOpen = false;
-        Serial.println("Failed To Open Room");
+        Serial.println("[x]: Failed To Open Room");
       }
 
       // INFO: Jika response yang diterima adalah "connectionstartup"
@@ -312,14 +310,12 @@ void setup() {
         isWaitingForConnectionPingResponse = false; // reset value
         isResponseDestinationCorrect = false;       // reset value
         Serial.println("[x]: Gateway Still Available");
-        // isConnectionReady = true;  // allow device to operate
-        // isGatewayAvailable = true; // alllow user to tap their card
       }
       digitalWrite(LED, LOW);
     });
 
     mesh.onChangedConnections(
-        []() { Serial.printf("[M]: Changed Connection\n"); });
+        []() { Serial.printf("[x]: Changed Connection\n"); });
   }
 
   // When First Start Up try to connect to gateway
@@ -340,7 +336,7 @@ void setup() {
   }
 
   Serial.println("[x]: Waking Up RFID Reader");
-  delay(5000);
+  delay(1000);
   SPI.begin();
   rfid.PCD_Init();
   Serial.println("[x]: Device Ready");
@@ -349,24 +345,26 @@ void setup() {
 long id = 0;
 int reading = 100;
 void loop() {
+
   if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
     cardIdContainer = "";
     for (byte i = 0; i < rfid.uid.size; i++) {
       cardIdContainer.concat(String(rfid.uid.uidByte[i] < 0x10 ? " 0" : ""));
       cardIdContainer.concat(String(rfid.uid.uidByte[i], HEX));
     }
-    Serial.print("[x]: CARD ID ");
-    Serial.println(cardIdContainer);
-    // Jika Waktu Menempel kartu masih kurang dari dua detik dari kartu terakhir
-    // yang di tempelkan maka jangan ijinkan mengirim data
+    // Serial.printf("[x]: CARD ID %s\n", cardIdContainer);
+
+    //  Jika Waktu Menempel kartu masih kurang dari dua detik dari kartu
+    //  terakhir yang di tempelkan maka jangan ijinkan mengirim data
+
     if (rfidScanTime != 0 && millis() - rfidScanTime < 2000) {
-      Serial.println("[x]: Device Cant Send Request");
+      // Serial.println("[x]: Device Cant Send Request");
       isDeviceAllowToSendAuth = false;
     } else {
       isCardExist = true;
       isDeviceAllowToSendAuth = true;
       rfidScanTime = millis();
-      Serial.println("[x]: Device Can Send Request");
+      // Serial.println("[x]: Device Can Send Request");
     }
   }
 
@@ -374,19 +372,6 @@ void loop() {
     mesh.update();
     // MENGIRIM PESAN SETIAP 10 DETIK
     uint64_t now = millis();
-    // if (now - authCheckTime > 15000) {
-    //   String msg = "{\"msgid\" : \"" + String(id) +
-    //                "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
-    //                "\",\"destination\" : \"" + DATA_GATEWAY +
-    //                "\",\"card\": "
-    //                "{\"id\" : \"4448c29FeAF0\",\"pin\" : \"123456\"}}";
-    //   authCheckTime = millis();
-    //   authRTOChecker = millis(); // 10
-    //   Serial.println("[i]: Sending Request To Gateway");
-    //   mesh.sendSingle(DATA_GATEWAY, msg);
-    //   isWaitingForAuthResponse = true;
-    //   id++;
-    // }
 
     if (isCardExist && isDeviceAllowToSendAuth) {
       String msg = "{\"msgid\" : \"" + String(id) +
@@ -398,6 +383,7 @@ void loop() {
       authCheckTime = millis();
       authRTOChecker = millis();
       Serial.println("[i]: Sending Request To Gateway");
+      Serial.printf("[x]: CARD ID %s\n", cardIdContainer);
       mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForAuthResponse = true;
       isCardExist = false;
