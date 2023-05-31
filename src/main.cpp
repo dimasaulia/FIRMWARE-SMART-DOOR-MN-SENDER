@@ -12,13 +12,14 @@
 #define LED 2
 #define MESH_PORT 5555
 // #define RTO_LIMIT 10000         // 10s
-#define RTO_LIMIT 8000          // 8s
+#define RTO_LIMIT 1800          // 8s
 #define DOOR_OPEN_DURATION 5000 // 5s
 
 String DATA_SSID; // Variables to save values from HTML form
 String DATA_PASSWORD;
 String DATA_GATEWAY;
 String DATA_NODE;
+String authResponsesTimeContainer = "";
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
 boolean isWaitingForConnectionPingResponse = false;
@@ -254,10 +255,13 @@ void setup() {
           doc["success"] == true && type == "auth") {
         unsigned long arrivalTime = millis();
         unsigned long waitingTime = arrivalTime - authRTOChecker;
-        Serial.println("[i]: Auth request start on " + String(authRTOChecker) +
-                       " receive response on " + String(arrivalTime) +
-                       " final response time " + String(waitingTime));
+        Serial.println("[i]: Auth request start on:" + String(authRTOChecker) +
+                       " receive response on:" + String(arrivalTime) +
+                       " final response time:" + String(waitingTime) +
+                       " Payload:" + String(msg.c_str()));
         doorTimestamp = millis();
+        String waitingTimeStr = String(waitingTime);
+        authResponsesTimeContainer += waitingTimeStr + ",";
         Serial.println("[i]: Sukses Membuka Pintu");
         isWaitingForAuthResponse = false;     // reset value
         isResponseDestinationCorrect = false; // reset value
@@ -323,19 +327,19 @@ long id = 0;
 int reading = 100;
 void loop() {
   reading = touchRead(TOUCH_RESET_PIN);
-  if (reading < 20) {
-    meshReset();
-  }
+  // if (reading < 20) {
+  //   meshReset();
+  // }
   if (isConnectionReady) {
     mesh.update();
-    // MENGIRIM PESAN SETIAP 10 DETIK
+    // MENGIRIM PESAN SETIAP 2 DETIK
     uint64_t now = millis();
-    if (now - authCheckTime > 15000) {
+    if (now - authCheckTime > 2000) {
       String msg = "{\"msgid\" : \"" + String(id) +
                    "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
-                   "{\"id\" : \"4448c29FeAF0\",\"pin\" : \"123456\"}}";
+                   "{\"id\" : \"90baac20 \",\"pin\" : \"123456\"}}";
       authCheckTime = millis();
       authRTOChecker = millis(); // 10
       Serial.println("[i]: Sending Request To Gateway");
@@ -369,11 +373,12 @@ void loop() {
     }
 
     // INFO: Ketersediaan Gateway
-    // Lakukan ping setiap 120 detik untuk melihat ketersediaan gateway
-    if (now - connectionPingCheckTime > 40000) {
+    // Lakukan ping setiap 30 detik untuk melihat ketersediaan gateway
+    if (now - connectionPingCheckTime > 30000) {
       connectionPingCheckTime = millis();
       Serial.println("[x]: Sending Connection Ping");
       String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
+                   "\",\"auth\":\"" + authResponsesTimeContainer +
                    "\", \"destination\" : \"" + DATA_GATEWAY + +"\"}";
       mesh.sendSingle(DATA_GATEWAY, msg);
       connectionPingRTOChecker = millis();
@@ -382,7 +387,8 @@ void loop() {
 
     if (isWaitingForConnectionPingResponse &&
         millis() - connectionPingRTOChecker > RTO_LIMIT) {
-      Serial.println("[x]: PING RTO");
+      Serial.println("[i]: PING RTO, Waiting Time More Then RTO Limit (" +
+                     String(RTO_LIMIT) + ")");
       isWaitingForConnectionPingResponse = false;
     }
   }
