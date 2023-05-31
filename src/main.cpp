@@ -16,8 +16,6 @@
 #include <namedMesh.h>
 #include <secret.h>
 
-#define MESH_SSID "smartdoornetwork"
-#define MESH_PASSWORD "t4np454nd1"
 #define LED 2
 #define MESH_PORT 5555
 #define RTO_LIMIT 8000           // 8s
@@ -37,6 +35,7 @@ String DATA_GATEWAY;
 String DEVICE_MODE = "AUTH"; // or ADMIN
 String DATA_NODE;
 String cardIdContainer;
+String softAPIP;
 String pinContainer;
 String authResponsesTimeContainer = "";
 String successPingResponsesTimeContainer = "";
@@ -50,6 +49,7 @@ boolean isResponseDestinationCorrect = false;
 boolean isGatewayAvailable = false;
 boolean isDoorOpen = false;
 boolean isCardExist = false;
+boolean isButtonPressFromInside = false;
 boolean isDeviceAllowToSendAuth = false;
 boolean isDisplayShowAlert = false;
 boolean isDisplayShowAlertHaveLimit = false;
@@ -76,13 +76,20 @@ const byte DISPLAY_WIDTH = 128;
 const byte DISPLAY_HEIGHT = 64;
 const byte ROWS = 4;
 const byte COLS = 4;
+// Alpha 3.1
 char keys[ROWS][COLS] = {
-    // Flat Keypad
     {'D', 'C', 'B', 'A'},
     {'#', '9', '6', '3'},
     {'0', '8', '5', '2'},
     {'*', '7', '4', '1'},
 };
+// Betta 3.2
+// char keys[ROWS][COLS] = {
+//     {'A', 'B', 'C', 'D'},
+//     {'3', '6', '9', '#'},
+//     {'2', '5', '8', '0'},
+//     {'1', '4', '7', '*'},
+// };
 short responseCounter = 0;
 // File paths to save input values permanentlys
 const char *nodePath = "/node.txt";
@@ -341,6 +348,7 @@ void setup() {
   pinMode(LED, OUTPUT);
   pinMode(RELAY, OUTPUT);
   pinMode(LED_GATEWAY, OUTPUT);
+  pinMode(TOUCH, INPUT);
   digitalWrite(LED, LOW);
   digitalWrite(RELAY, LOW);
   digitalWrite(LED_GATEWAY, LOW);
@@ -372,6 +380,7 @@ void setup() {
       ip += i ? "." + String(IP[i]) : String(IP[i]);
     }
 
+    softAPIP = ip;
     displayAPMode(ip);
     Serial.print("[x]: AP IP address: ");
     Serial.println(ip);
@@ -583,6 +592,14 @@ void setup() {
 long id = 0;
 int reading = 100;
 void loop() {
+  // Touch Button
+  Serial.println(analogRead(TOUCH));
+  if (analogRead(TOUCH) > 1000) {
+    isDoorOpen = true;
+    doorTimestamp = millis();
+    isButtonPressFromInside = true;
+  }
+
   // INFO: RFID
   if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
     cardIdContainer = "";
@@ -733,41 +750,6 @@ void loop() {
     //   Serial.println("[x]: Waiting...");
     // }
 
-    // INFO: magnetic lock handler
-    // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama perintah
-    // untuk membuka pintu
-    if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
-      // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
-      // Relay Menyala Untuk Membuka Pintu
-      digitalWrite(RELAY, HIGH);
-      alert("SUCCESS\n OPEN \n ROOM");
-      isDisplayShowAlert = true;
-    }
-
-    // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
-    if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
-      // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
-      // Relay Mati Pintu, Kembali terkunci
-      digitalWrite(RELAY, LOW);
-      isDoorOpen = false;
-      isDisplayShowAlert = false;
-    }
-
-    if (isDoorOpen == false) {
-      digitalWrite(RELAY, LOW);
-    }
-
-    // INFO: Display Handler
-    if (isDisplayShowAlert == false) {
-      displayWritePin(pinContainer);
-    }
-
-    if (millis() > alertTimestamp + DISPLAT_ALERT_LIMIT &&
-        isDisplayShowAlertHaveLimit == true) {
-      isDisplayShowAlert = false;
-      isDisplayShowAlertHaveLimit = false;
-    }
-
     // INFO: Ketersediaan Gateway
     // Lakukan ping setiap 60 detik untuk melihat ketersediaan gateway
     if (now - connectionPingCheckTime > 60000) {
@@ -801,5 +783,50 @@ void loop() {
       isCheckingConnection = false;
       isGatewayAvailable = false; // reset gateway response
     }
+  }
+
+  // INFO: magnetic lock handler
+  // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama perintah
+  // untuk membuka pintu
+  if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
+    // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
+    // Relay Menyala Untuk Membuka Pintu
+    digitalWrite(RELAY, HIGH);
+    if (isButtonPressFromInside) {
+      alert("OPEN\n FROM\n INSIDE");
+    } else {
+      alert("SUCCESS\n OPEN \n ROOM");
+    }
+
+    isDisplayShowAlert = true;
+  }
+
+  // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
+  if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
+    // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
+    // Relay Mati Pintu, Kembali terkunci
+    digitalWrite(RELAY, LOW);
+    isDoorOpen = false;
+    isDisplayShowAlert = false;
+    isButtonPressFromInside = false;
+  }
+
+  if (isDoorOpen == false) {
+    digitalWrite(RELAY, LOW);
+  }
+
+  // INFO: Display Handler
+  if (isDisplayShowAlert == false && APStatus == false) {
+    displayWritePin(pinContainer);
+  }
+
+  if (isDisplayShowAlert == false && APStatus == true) {
+    displayAPMode(softAPIP);
+  }
+
+  if (millis() > alertTimestamp + DISPLAT_ALERT_LIMIT &&
+      isDisplayShowAlertHaveLimit == true) {
+    isDisplayShowAlert = false;
+    isDisplayShowAlertHaveLimit = false;
   }
 }
