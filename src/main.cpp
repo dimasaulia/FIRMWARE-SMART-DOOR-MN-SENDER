@@ -12,7 +12,7 @@
 #define LED 2
 #define MESH_PORT 5555
 // #define RTO_LIMIT 10000         // 10s
-#define RTO_LIMIT 1800          // 8s
+#define RTO_LIMIT 3500          // 8s
 #define DOOR_OPEN_DURATION 5000 // 5s
 
 String DATA_SSID; // Variables to save values from HTML form
@@ -225,7 +225,7 @@ void setup() {
 
       // Pastikan Data Yang Diterima Memang Ditujukan Untuk Node Ini, Ubah Data
       // menjadi JSON Terlebih dahulu
-      StaticJsonDocument<200> doc;
+      StaticJsonDocument<512> doc;
       DeserializationError error = deserializeJson(doc, msg.c_str());
       if (error) {
         Serial.println("[e]: Failed to deserializeJson");
@@ -324,6 +324,7 @@ void setup() {
 }
 
 long id = 0;
+String msgIdStr = "";
 int reading = 100;
 void loop() {
   reading = touchRead(TOUCH_RESET_PIN);
@@ -334,8 +335,9 @@ void loop() {
     mesh.update();
     // MENGIRIM PESAN SETIAP 2 DETIK
     uint64_t now = millis();
-    if (now - authCheckTime > 2000) {
-      String msg = "{\"msgid\" : \"" + String(id) +
+    if (now - authCheckTime > 6000) {
+      msgIdStr = String(id);
+      String msg = "{\"msgid\" : \"" + msgIdStr +
                    "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
@@ -349,7 +351,8 @@ void loop() {
     }
 
     if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
-      Serial.println("[i]: AUTH RTO");
+      Serial.println("[i]: AUTH RTO FOR MSG: " + msgIdStr +
+                     ", WAITING TIME MORE THEN " + String(RTO_LIMIT));
       isWaitingForAuthResponse = false;
     }
 
@@ -374,20 +377,21 @@ void loop() {
 
     // INFO: Ketersediaan Gateway
     // Lakukan ping setiap 30 detik untuk melihat ketersediaan gateway
-    if (now - connectionPingCheckTime > 30000) {
+    if (now - connectionPingCheckTime > 10000) {
       connectionPingCheckTime = millis();
-      Serial.println("[x]: Sending Connection Ping");
       String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
                    "\",\"auth\":\"" + authResponsesTimeContainer +
                    "\", \"destination\" : \"" + DATA_GATEWAY + +"\"}";
+      Serial.println("[x]: Sending Connection Ping" + msg);
       mesh.sendSingle(DATA_GATEWAY, msg);
       connectionPingRTOChecker = millis();
+      authResponsesTimeContainer = "";
       isWaitingForConnectionPingResponse = true;
     }
 
     if (isWaitingForConnectionPingResponse &&
         millis() - connectionPingRTOChecker > RTO_LIMIT) {
-      Serial.println("[i]: PING RTO, Waiting Time More Then RTO Limit (" +
+      Serial.println("[x]: PING RTO, Waiting Time More Then RTO Limit (" +
                      String(RTO_LIMIT) + ")");
       isWaitingForConnectionPingResponse = false;
     }
