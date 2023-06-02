@@ -15,10 +15,12 @@
 #define RTO_LIMIT 3500          // 8s
 #define DOOR_OPEN_DURATION 5000 // 5s
 
-String DATA_SSID; // Variables to save values from HTML form
-String DATA_PASSWORD;
-String DATA_GATEWAY;
-String DATA_NODE;
+String DATA_SSID =
+    "MN-GATEWAY-0S4dG-1"; // Variables to save values from HTML form
+String DATA_PASSWORD = "gttswkcu";
+String DATA_GATEWAY = "GATEWAY-0S4dG";
+// String DATA_NODE = "qhx6y";
+String DATA_NODE = "Aq5iG";
 String authResponsesTimeContainer = "";
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
@@ -121,102 +123,26 @@ void meshReset() {
 
 void setup() {
   Serial.begin(115200);
-  initSPIFFS();
+  // initSPIFFS();
 
   // Pin Controll
   pinMode(LED, OUTPUT);
   digitalWrite(LED, LOW);
 
-  // read variable
-  DATA_SSID = readFile(SPIFFS, ssidPath);
-  DATA_PASSWORD = readFile(SPIFFS, passwordPath);
-  DATA_NODE = readFile(SPIFFS, nodePath);
-  DATA_GATEWAY = readFile(SPIFFS, gatewayPath);
-  Serial.print("SSID: ");
-  Serial.println(DATA_SSID);
-  Serial.print("Password: ");
-  Serial.println(DATA_PASSWORD);
-  Serial.print("Node: ");
-  Serial.println(DATA_NODE);
-  Serial.print("Gateway: ");
-  Serial.println(DATA_GATEWAY);
-
-  if (meshStatus() == false) {
-    // if (true) {
-    // Connect to ESP Mesh network with SSID and password
-    APStatus = true;
-    Serial.println("Setting AP (Access Point)");
-    // NULL sets an open Access Point
-    WiFi.softAP("ESP-MESH-MANAGER", NULL);
-
-    IPAddress IP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
-    Serial.println(IP);
-
-    // Web Server Root URL
-    // server.serveStatic("/", SPIFFS, "/");
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-      request->send(SPIFFS, "/index.html", "text/html");
-    });
-
-    // Handling POST Request
-
-    server.on("/", HTTP_POST, [](AsyncWebServerRequest *request) {
-      int params = request->params();
-      for (int i = 0; i < params; i++) {
-        AsyncWebParameter *p = request->getParam(i);
-        if (p->isPost()) {
-          // HTTP POST ssid value
-          if (p->name() == PARAM_INPUT_1) {
-            DATA_SSID = p->value().c_str();
-            Serial.print("SSID set to: ");
-            Serial.println(DATA_SSID);
-            // Write file to save value
-            writeFile(SPIFFS, ssidPath, DATA_SSID.c_str());
-          }
-          // HTTP POST password value
-          if (p->name() == PARAM_INPUT_2) {
-            DATA_PASSWORD = p->value().c_str();
-            Serial.print("Password set to: ");
-            Serial.println(DATA_PASSWORD);
-            // Write file to save value
-            writeFile(SPIFFS, passwordPath, DATA_PASSWORD.c_str());
-          }
-          // HTTP POST Node value
-          if (p->name() == PARAM_INPUT_3) {
-            DATA_NODE = p->value().c_str();
-            Serial.print("Node value set to: ");
-            Serial.println(DATA_NODE);
-            // Write file to save value
-            writeFile(SPIFFS, nodePath, DATA_NODE.c_str());
-          }
-          // HTTP POST gateway value
-          if (p->name() == PARAM_INPUT_4) {
-            DATA_GATEWAY = p->value().c_str();
-            Serial.print("Gateway set to: ");
-            Serial.println(DATA_GATEWAY);
-            // Write file to save value
-            writeFile(SPIFFS, gatewayPath, DATA_GATEWAY.c_str());
-          }
-          // Serial.printf("POST[%s]: %s\n", p->name().c_str(),
-          // p->value().c_str());
-        }
-      }
-      request->send(200, "text/plain",
-                    "Done. ESP will restart, connect to ESP Mesh Network  ");
-      APStatus = false;
-      delay(3000);
-      ESP.restart();
-    });
-
-    server.begin();
-  }
-
-  if (meshStatus() == true && APStatus == false) {
+  if (true == true) {
     Serial.println("Trying to connect to esp mesh");
     mesh.setDebugMsgTypes(ERROR | STARTUP);
     mesh.init(DATA_SSID, DATA_PASSWORD, &userScheduler, MESH_PORT);
     mesh.setName(DATA_NODE);
+    Serial.println("========== ESP MESH ESTABLISH ==========");
+    Serial.print("SSID: ");
+    Serial.println(DATA_SSID);
+    Serial.print("PASSWORD: ");
+    Serial.println(DATA_PASSWORD);
+    Serial.print("NODE NAME: ");
+    Serial.println(DATA_NODE);
+    Serial.print("DESTINATION GATEWAY: ");
+    Serial.println(DATA_GATEWAY);
 
     mesh.onReceive([](String &from, String &msg) {
       digitalWrite(LED, HIGH);
@@ -255,14 +181,15 @@ void setup() {
           doc["success"] == true && type == "auth") {
         unsigned long arrivalTime = millis();
         unsigned long waitingTime = arrivalTime - authRTOChecker;
-        Serial.println("[i]: Auth request start on:" + String(authRTOChecker) +
-                       " receive response on:" + String(arrivalTime) +
-                       " final response time:" + String(waitingTime) +
-                       " Payload:" + String(msg.c_str()));
+        Serial.println(
+            "[x]: One Trip request start on:" + String(authRTOChecker) +
+            " receive response on:" + String(arrivalTime) +
+            " final response time:" + String(waitingTime) +
+            " Payload:" + String(msg.c_str()));
         doorTimestamp = millis();
         String waitingTimeStr = String(waitingTime);
         authResponsesTimeContainer += waitingTimeStr + ",";
-        Serial.println("[i]: Sukses Membuka Pintu");
+        Serial.println("[x]: Sukses Membuka Pintu");
         isWaitingForAuthResponse = false;     // reset value
         isResponseDestinationCorrect = false; // reset value
         isDoorOpen = true;
@@ -287,7 +214,7 @@ void setup() {
           doc["success"] == true && doc["type"] == "connectionping") {
         unsigned long arrivalTime = millis();
         unsigned long waitingTime = arrivalTime - connectionPingRTOChecker;
-        Serial.println("[i]: Connection Ping start on " +
+        Serial.println("[x]: Connection Ping start on " +
                        String(connectionPingRTOChecker) + " receive reply on " +
                        String(arrivalTime) + " final response time " +
                        String(waitingTime));
@@ -335,10 +262,10 @@ void loop() {
     mesh.update();
     // MENGIRIM PESAN SETIAP 2 DETIK
     uint64_t now = millis();
-    if (now - authCheckTime > 6000) {
+    if (now - authCheckTime > 500) {
       msgIdStr = String(id);
       String msg = "{\"msgid\" : \"" + msgIdStr +
-                   "\",\"type\":\"auth\",\"source\" : \"" + DATA_NODE +
+                   "\",\"type\":\"onetrip\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
                    "{\"id\" : \"90baac20 \",\"pin\" : \"123456\"}}";
@@ -350,11 +277,11 @@ void loop() {
       id++;
     }
 
-    if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
-      Serial.println("[i]: AUTH RTO FOR MSG: " + msgIdStr +
-                     ", WAITING TIME MORE THEN " + String(RTO_LIMIT));
-      isWaitingForAuthResponse = false;
-    }
+    // if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
+    //   Serial.println("[x]: AUTH RTO FOR MSG: " + msgIdStr +
+    //                  ", WAITING TIME MORE THEN " + String(RTO_LIMIT));
+    //   isWaitingForAuthResponse = false;
+    // }
 
     // if (isWaitingForAuthResponse) {
     //   // Lakukan Sesuatu Ketika Sedang Menunggu Response
@@ -363,37 +290,38 @@ void loop() {
 
     // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama pintu
     // bisa
-    if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
-      // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
-      // Relay Menyala Untuk Membuka Pintu
-    }
+    // if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
+    // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
+    // Relay Menyala Untuk Membuka Pintu
+    // }
 
     // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
-    if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
-      // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
-      // Relay Mati Pintu, Kembali terkunci
-      isDoorOpen = false;
-    }
+    // if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
+    // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
+    // Relay Mati Pintu, Kembali terkunci
+    // isDoorOpen = false;
+    // }
 
     // INFO: Ketersediaan Gateway
     // Lakukan ping setiap 30 detik untuk melihat ketersediaan gateway
-    if (now - connectionPingCheckTime > 10000) {
-      connectionPingCheckTime = millis();
-      String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
-                   "\",\"auth\":\"" + authResponsesTimeContainer +
-                   "\", \"destination\" : \"" + DATA_GATEWAY + +"\"}";
-      Serial.println("[x]: Sending Connection Ping" + msg);
-      mesh.sendSingle(DATA_GATEWAY, msg);
-      connectionPingRTOChecker = millis();
-      authResponsesTimeContainer = "";
-      isWaitingForConnectionPingResponse = true;
-    }
+    // if (now - connectionPingCheckTime > 10000) {
+    //   connectionPingCheckTime = millis();
+    //   String msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE
+    //   +
+    //                "\",\"auth\":\"" + authResponsesTimeContainer +
+    //                "\", \"destination\" : \"" + DATA_GATEWAY + +"\"}";
+    //   Serial.println("[x]: Sending Connection Ping" + msg);
+    //   mesh.sendSingle(DATA_GATEWAY, msg);
+    //   connectionPingRTOChecker = millis();
+    //   authResponsesTimeContainer = "";
+    //   isWaitingForConnectionPingResponse = true;
+    // }
 
-    if (isWaitingForConnectionPingResponse &&
-        millis() - connectionPingRTOChecker > RTO_LIMIT) {
-      Serial.println("[x]: PING RTO, Waiting Time More Then RTO Limit (" +
-                     String(RTO_LIMIT) + ")");
-      isWaitingForConnectionPingResponse = false;
-    }
+    // if (isWaitingForConnectionPingResponse &&
+    //     millis() - connectionPingRTOChecker > RTO_LIMIT) {
+    //   Serial.println("[x]: PING RTO, Waiting Time More Then RTO Limit (" +
+    //                  String(RTO_LIMIT) + ")");
+    //   isWaitingForConnectionPingResponse = false;
+    // }
   }
 }
