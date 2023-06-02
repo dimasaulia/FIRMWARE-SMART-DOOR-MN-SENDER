@@ -178,18 +178,17 @@ void setup() {
       // INFO: Jika tipe response yang diterima adalah "auth"
       // Melihat response apakah pintu bisa dibuka
       if (isWaitingForAuthResponse && isResponseDestinationCorrect &&
-          doc["success"] == true && type == "auth") {
+          type == "fulltrip") {
         unsigned long arrivalTime = millis();
         unsigned long waitingTime = arrivalTime - authRTOChecker;
         Serial.println(
-            "[x]: One Trip request start on:" + String(authRTOChecker) +
+            "[i]: Full Trip request start on:" + String(authRTOChecker) +
             " receive response on:" + String(arrivalTime) +
             " final response time:" + String(waitingTime) +
             " Payload:" + String(msg.c_str()));
         doorTimestamp = millis();
         String waitingTimeStr = String(waitingTime);
         authResponsesTimeContainer += waitingTimeStr + ",";
-        Serial.println("[x]: Sukses Membuka Pintu");
         isWaitingForAuthResponse = false;     // reset value
         isResponseDestinationCorrect = false; // reset value
         isDoorOpen = true;
@@ -200,29 +199,8 @@ void setup() {
           isResponseDestinationCorrect && doc["success"] == true &&
           type == "connectionstartup") {
         unsigned long waitingTime = millis() - connectionStartupRTOChecker;
-        Serial.println("[x]: Connection Ready in " + String(waitingTime) +
-                       " ms");
-        Serial.println("[x]: Device Ready");
-        isWaitingForConnectionStartupResponse = false; // reset value
-        isResponseDestinationCorrect = false;          // reset value
-        isConnectionReady = true;  // allow device to operate
-        isGatewayAvailable = true; // alllow user to tap their card
-      }
-
-      // INFO: Jika response yang diterima adalah "connectionping"
-      if (isWaitingForConnectionPingResponse && isResponseDestinationCorrect &&
-          doc["success"] == true && doc["type"] == "connectionping") {
-        unsigned long arrivalTime = millis();
-        unsigned long waitingTime = arrivalTime - connectionPingRTOChecker;
-        Serial.println("[x]: Connection Ping start on " +
-                       String(connectionPingRTOChecker) + " receive reply on " +
-                       String(arrivalTime) + " final response time " +
-                       String(waitingTime));
-        isWaitingForConnectionPingResponse = false; // reset value
-        isResponseDestinationCorrect = false;       // reset value
-        Serial.println("[x]: Gateway Still Available");
-        // isConnectionReady = true;  // allow device to operate
-        // isGatewayAvailable = true; // alllow user to tap their card
+        isConnectionReady = true;
+        Serial.println("[x]: DEVICE RERADY");
       }
       digitalWrite(LED, LOW);
     });
@@ -265,7 +243,7 @@ void loop() {
     if (now - authCheckTime > 500) {
       msgIdStr = String(id);
       String msg = "{\"msgid\" : \"" + msgIdStr +
-                   "\",\"type\":\"onetrip\",\"source\" : \"" + DATA_NODE +
+                   "\",\"type\":\"fulltrip\",\"source\" : \"" + DATA_NODE +
                    "\",\"destination\" : \"" + DATA_GATEWAY +
                    "\",\"card\": "
                    "{\"id\" : \"90baac20 \",\"pin\" : \"123456\"}}";
@@ -277,11 +255,11 @@ void loop() {
       id++;
     }
 
-    // if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
-    //   Serial.println("[x]: AUTH RTO FOR MSG: " + msgIdStr +
-    //                  ", WAITING TIME MORE THEN " + String(RTO_LIMIT));
-    //   isWaitingForAuthResponse = false;
-    // }
+    if (isWaitingForAuthResponse && millis() - authRTOChecker > RTO_LIMIT) {
+      Serial.println("[i]: AUTH RTO FOR MSG: " + msgIdStr +
+                     ", WAITING TIME MORE THEN " + String(RTO_LIMIT));
+      isWaitingForAuthResponse = false;
+    }
 
     // if (isWaitingForAuthResponse) {
     //   // Lakukan Sesuatu Ketika Sedang Menunggu Response
