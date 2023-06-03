@@ -19,8 +19,8 @@ String DATA_SSID =
     "MN-GATEWAY-0S4dG-1"; // Variables to save values from HTML form
 String DATA_PASSWORD = "gttswkcu";
 String DATA_GATEWAY = "GATEWAY-0S4dG";
-// String DATA_NODE = "qhx6y";
-String DATA_NODE = "Aq5iG";
+String DATA_NODE = "qhx6y";
+// String DATA_NODE = "Aq5iG";
 String authResponsesTimeContainer = "";
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
@@ -271,7 +271,7 @@ void loop() {
                    "{\"id\" : \"90baac20 \",\"pin\" : \"123456\"}}";
       authCheckTime = millis();
       authRTOChecker = millis(); // 10
-      Serial.println("[i]: Sending Request To Gateway");
+      Serial.println("[i]: Sending Request To Gateway," + msg);
       mesh.sendSingle(DATA_GATEWAY, msg);
       isWaitingForAuthResponse = true;
       id++;
