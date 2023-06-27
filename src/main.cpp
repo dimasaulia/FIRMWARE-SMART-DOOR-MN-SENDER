@@ -77,19 +77,19 @@ const byte DISPLAY_HEIGHT = 64;
 const byte ROWS = 4;
 const byte COLS = 4;
 // Alpha 3.1
-char keys[ROWS][COLS] = {
-    {'D', 'C', 'B', 'A'},
-    {'#', '9', '6', '3'},
-    {'0', '8', '5', '2'},
-    {'*', '7', '4', '1'},
-};
-// Betta 3.2
 // char keys[ROWS][COLS] = {
-//     {'A', 'B', 'C', 'D'},
-//     {'3', '6', '9', '#'},
-//     {'2', '5', '8', '0'},
-//     {'1', '4', '7', '*'},
+//     {'D', 'C', 'B', 'A'},
+//     {'#', '9', '6', '3'},
+//     {'0', '8', '5', '2'},
+//     {'*', '7', '4', '1'},
 // };
+// Betta 3.2
+char keys[ROWS][COLS] = {
+    {'A', 'B', 'C', 'D'},
+    {'3', '6', '9', '#'},
+    {'2', '5', '8', '0'},
+    {'1', '4', '7', '*'},
+};
 short responseCounter = 0;
 // File paths to save input values permanentlys
 const char *nodePath = "/node.txt";
@@ -350,7 +350,7 @@ void setup() {
   pinMode(LED_GATEWAY, OUTPUT);
   pinMode(TOUCH, INPUT);
   digitalWrite(LED, LOW);
-  digitalWrite(RELAY, LOW);
+  digitalWrite(RELAY, HIGH); // Sudah di rubah
   digitalWrite(LED_GATEWAY, LOW);
 
   // read variable
@@ -443,7 +443,7 @@ void setup() {
 
   if (meshStatus() == true && APStatus == false) {
     Serial.println("[x]: Trying to connect to esp mesh");
-    mesh.setDebugMsgTypes(ERROR | STARTUP | CONNECTION);
+    mesh.setDebugMsgTypes(ERROR | STARTUP);
     mesh.init(DATA_SSID, DATA_PASSWORD, &userScheduler, MESH_PORT);
     mesh.setName(DATA_NODE);
 
@@ -791,7 +791,7 @@ void loop() {
   if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
     // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
     // Relay Menyala Untuk Membuka Pintu
-    digitalWrite(RELAY, HIGH);
+    digitalWrite(RELAY, LOW); // Sudah Dirubah
     if (isButtonPressFromInside) {
       alert("OPEN\n FROM\n INSIDE");
     } else {
@@ -805,14 +805,14 @@ void loop() {
   if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
     // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
     // Relay Mati Pintu, Kembali terkunci
-    digitalWrite(RELAY, LOW);
+    digitalWrite(RELAY, HIGH); // Sudah Dirubah
     isDoorOpen = false;
     isDisplayShowAlert = false;
     isButtonPressFromInside = false;
   }
 
   if (isDoorOpen == false) {
-    digitalWrite(RELAY, LOW);
+    digitalWrite(RELAY, HIGH); // Sudah Dirubah
   }
 
   // INFO: Display Handler
