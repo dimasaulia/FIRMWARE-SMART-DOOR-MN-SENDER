@@ -25,6 +25,7 @@
 #define I2C_LCD_ADDR 0x3C
 #define TOUCH 33
 #define RELAY 27
+#define RESET_BUTTON 25
 #define LED_GATEWAY 32
 // #define LED_TX 16
 // #define LED_RX 17
@@ -163,43 +164,6 @@ bool meshStatus() {
   return true;
 }
 
-// Reset Mesh Network
-void meshReset() {
-  Serial.println("[x]: Attempting To Reset ESP Mesh Network");
-  String empty = "";
-  writeFile(SPIFFS, ssidPath, empty.c_str());
-  writeFile(SPIFFS, passwordPath, empty.c_str());
-  writeFile(SPIFFS, nodePath, empty.c_str());
-  writeFile(SPIFFS, gatewayPath, empty.c_str());
-  delay(3000);
-  ESP.restart();
-}
-
-// Check gateway connection
-void meshCheckConnection() {
-  connectionPingCheckTime = millis();
-  Serial.println("[x]: Sending Connection Ping");
-  String msg = "";
-  if (joinConnectionResponsesTimeContainer != "") {
-    msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
-          "\", \"destination\" : \"" + DATA_GATEWAY + +"\",\"auth\":\"" +
-          authResponsesTimeContainer + "\",\"startupconnection\":\"" +
-          joinConnectionResponsesTimeContainer + "\"}";
-  }
-  if (joinConnectionResponsesTimeContainer == "") {
-    msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
-          "\", \"destination\" : \"" + DATA_GATEWAY + +"\",\"auth\":\"" +
-          authResponsesTimeContainer + "\"}";
-  }
-  mesh.sendSingle(DATA_GATEWAY, msg);
-  connectionPingRTOChecker = millis();
-  isWaitingForConnectionPingResponse = true;
-  authResponsesTimeContainer = ""; // reset container
-  successPingResponsesTimeContainer = "";
-  joinConnectionResponsesTimeContainer = "";
-}
-
-// INFO: Display Handler
 void centerText(byte yLevel, byte fontSize, String text) {
   short textLength = text.length();
   byte marginTop = 5;
@@ -232,6 +196,44 @@ void centerText(byte yLevel, byte fontSize, String text) {
   display.print(text);
   // Serial.printf("Text: %s, X: %s, Y: %s", text, xPos, yPos);
 }
+// Reset Mesh Network
+void meshReset() {
+  Serial.println("[x]: Attempting To Reset ESP Mesh Network");
+  String empty = "";
+  writeFile(SPIFFS, ssidPath, empty.c_str());
+  writeFile(SPIFFS, passwordPath, empty.c_str());
+  writeFile(SPIFFS, nodePath, empty.c_str());
+  writeFile(SPIFFS, gatewayPath, empty.c_str());
+  centerText(2, 2, "RESET CREDENTIAL");
+  delay(3000);
+  ESP.restart();
+}
+
+// Check gateway connection
+void meshCheckConnection() {
+  connectionPingCheckTime = millis();
+  Serial.println("[x]: Sending Connection Ping");
+  String msg = "";
+  if (joinConnectionResponsesTimeContainer != "") {
+    msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
+          "\", \"destination\" : \"" + DATA_GATEWAY + +"\",\"auth\":\"" +
+          authResponsesTimeContainer + "\",\"startupconnection\":\"" +
+          joinConnectionResponsesTimeContainer + "\"}";
+  }
+  if (joinConnectionResponsesTimeContainer == "") {
+    msg = "{\"type\":\"connectionping\", \"source\":\"" + DATA_NODE +
+          "\", \"destination\" : \"" + DATA_GATEWAY + +"\",\"auth\":\"" +
+          authResponsesTimeContainer + "\"}";
+  }
+  mesh.sendSingle(DATA_GATEWAY, msg);
+  connectionPingRTOChecker = millis();
+  isWaitingForConnectionPingResponse = true;
+  authResponsesTimeContainer = ""; // reset container
+  successPingResponsesTimeContainer = "";
+  joinConnectionResponsesTimeContainer = "";
+}
+
+// INFO: Display Handler
 
 void leftText(byte yLevel, byte fontSize, String text) {
   short textLength = text.length();
@@ -349,6 +351,7 @@ void setup() {
   pinMode(RELAY, OUTPUT);
   pinMode(LED_GATEWAY, OUTPUT);
   pinMode(TOUCH, INPUT);
+  pinMode(RESET_BUTTON, INPUT);
   digitalWrite(LED, LOW);
   digitalWrite(RELAY, HIGH); // Sudah di rubah
   digitalWrite(LED_GATEWAY, LOW);
@@ -576,6 +579,11 @@ void setup() {
         displayWaitingConnection();
       }
     }
+
+    // INFO: RESET BUTTON
+    if (digitalRead(RESET_BUTTON) == HIGH) {
+      meshReset();
+    }
   }
 
   if (isConnectionReady && APStatus == false) {
@@ -592,12 +600,17 @@ void setup() {
 long id = 0;
 int reading = 100;
 void loop() {
-  // Touch Button
-  Serial.println(analogRead(TOUCH));
+  // INFO: TUCH BUTTON
+  // Serial.println(analogRead(TOUCH));
   if (analogRead(TOUCH) > 1000) {
     isDoorOpen = true;
     doorTimestamp = millis();
     isButtonPressFromInside = true;
+  }
+
+  // INFO: RESET BUTTON
+  if (digitalRead(RESET_BUTTON) == HIGH) {
+    meshReset();
   }
 
   // INFO: RFID
