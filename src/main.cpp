@@ -4,6 +4,7 @@
 #include <Adafruit_GFX.h> // Core graphics library
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
+#include <AsyncElegantOTA.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Key.h>
@@ -440,6 +441,9 @@ void setup() {
       delay(3000);
       ESP.restart();
     });
+
+    // WEB Server FOR OTA
+    AsyncElegantOTA.begin(&server);
 
     server.begin();
   }
