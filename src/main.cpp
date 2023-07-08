@@ -175,7 +175,7 @@ void centerText(byte yLevel, byte fontSize, String text) {
   }
   switch (yLevel) {
   case 1:
-    yPos = 3;
+    yPos = 2;
     break;
 
   case 2:
@@ -238,7 +238,7 @@ void meshCheckConnection() {
 
 void leftText(byte yLevel, byte fontSize, String text) {
   short textLength = text.length();
-  byte yPos = 3;
+  byte yPos = 2;
   byte xPos = 5;
   byte marginTop = 5;
   if (fontSize == 1) {
@@ -588,6 +588,44 @@ void setup() {
     if (digitalRead(RESET_BUTTON) == HIGH) {
       meshReset();
     }
+
+    // INFO: TUCH BUTTON
+    // Serial.println(analogRead(TOUCH));
+    if (analogRead(TOUCH) > 1000) {
+      isDoorOpen = true;
+      doorTimestamp = millis();
+      isButtonPressFromInside = true;
+    }
+
+    // INFO: magnetic lock handler
+    // Jika pintu bisa dibuka dan waktu sekarang dikurang waktu pertama perintah
+    // untuk membuka pintu
+    if (isDoorOpen && millis() - doorTimestamp < DOOR_OPEN_DURATION) {
+      // Lakukan Sesuatu Ketika Pintu Bisa Dibuka
+      // Relay Menyala Untuk Membuka Pintu
+      digitalWrite(RELAY, LOW); // Sudah Dirubah
+      if (isButtonPressFromInside) {
+        alert("OPEN\n FROM\n INSIDE");
+      } else {
+        alert("SUCCESS\n OPEN \n ROOM");
+      }
+
+      isDisplayShowAlert = true;
+    }
+
+    // Jika Sudah melebihi batas waktu durasi membuka pintu maka matikan relay
+    if (isDoorOpen && millis() - doorTimestamp > DOOR_OPEN_DURATION) {
+      // Lakukan Sesuatu Ketika Pintu Bisa Ditutup
+      // Relay Mati Pintu, Kembali terkunci
+      digitalWrite(RELAY, HIGH); // Sudah Dirubah
+      isDoorOpen = false;
+      isDisplayShowAlert = false;
+      isButtonPressFromInside = false;
+    }
+
+    if (isDoorOpen == false) {
+      digitalWrite(RELAY, HIGH); // Sudah Dirubah
+    }
   }
 
   if (isConnectionReady && APStatus == false) {
@@ -846,4 +884,6 @@ void loop() {
     isDisplayShowAlert = false;
     isDisplayShowAlertHaveLimit = false;
   }
+
+  rfid.PCD_Init();
 }
