@@ -2,6 +2,7 @@
 //
 #include "SPIFFS.h"
 #include <Adafruit_GFX.h> // Core graphics library
+#include <Adafruit_PN532.h>
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
 #include <AsyncElegantOTA.h>
@@ -28,6 +29,10 @@
 #define RELAY 27
 #define RESET_BUTTON 25
 #define LED_GATEWAY 32
+#define PN532_SCK (18)
+#define PN532_MISO (19)
+#define PN532_MOSI (23)
+#define PN532_SS (15)
 // #define LED_TX 16
 // #define LED_RX 17
 
@@ -42,6 +47,9 @@ String pinContainer;
 String authResponsesTimeContainer = "";
 String successPingResponsesTimeContainer = "";
 String joinConnectionResponsesTimeContainer = "";
+String idcard;                           // PN532
+String tagId = "None", dispTag = "None"; // PN532
+byte nuidPICC[4];                        // PN532
 boolean isWaitingForAuthResponse = false;
 boolean isWaitingForConnectionStartupResponse = false;
 boolean isWaitingForConnectionPingResponse = false;
@@ -67,8 +75,6 @@ unsigned long authRTOChecker = 0;
 unsigned long doorTimestamp = 0;
 unsigned long bootTimestamp = 0;
 unsigned long alertTimestamp = 0;
-const short RFID_RST = 4;
-const short RFID_SS = 15;
 const char *PARAM_INPUT_1 = "ssid"; // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_2 = "password";
 const char *PARAM_INPUT_3 = "node";
@@ -106,12 +112,12 @@ AsyncWebServer server(80); // Create AsyncWebServer object on port 80
 IPAddress localIP;         // Set IP address
 IPAddress localGateway;
 IPAddress subnet(255, 255, 0, 0);
-MFRC522 rfid(RFID_SS, RFID_RST);
 byte rowPins[ROWS] = {0, 1, 2, 3};
 byte colPins[COLS] = {4, 5, 6, 7};
 Keypad_I2C keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS,
                   I2C_KEYPAD_ADDR, PCF8574);
 Adafruit_SSD1306 display(DISPLAY_WIDTH, DISPLAY_HEIGHT, &Wire, -1);
+Adafruit_PN532 nfc(PN532_SCK, PN532_MISO, PN532_MOSI, PN532_SS);
 
 // Initialize SPIFFS
 void initSPIFFS() {
@@ -334,6 +340,43 @@ void displayWritePin(String pin) {
     }
 
   display.display();
+}
+
+String tagToString(byte id[4]) {
+  String tagId = "";
+  for (byte i = 0; i < 4; i++) {
+    if (i < 3)
+      tagId += String(id[i]) + ".";
+    else
+      tagId += String(id[i]);
+  }
+  return tagId;
+}
+
+void readNFC() {
+  boolean success;
+  uint8_t uid[] = {0, 0, 0, 0, 0, 0, 0}; // Buffer to store the returned UID
+  uint8_t uidLength; // Length of the UID (4 or 7 bytes depending on ISO14443A
+                     // card type)
+  success =
+      nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, &uid[0], &uidLength, 50);
+  if (success) {
+    Serial.print("UID Length: ");
+    Serial.print(uidLength, HEX);
+    Serial.println(" bytes");
+    Serial.print("UID Value: ");
+    for (uint8_t i = 0; i < uidLength; i++) {
+      nuidPICC[i] = uid[i];
+      Serial.print(" ");
+      Serial.print(uid[i], HEX);
+    }
+    Serial.println();
+    tagId = tagToString(nuidPICC);
+    Serial.print(F("tagId is : "));
+    Serial.println(tagId);
+    Serial.println("");
+    // delay(50); // 1 second halt
+  }
 }
 
 void setup() {
@@ -634,13 +677,32 @@ void setup() {
     Serial.println("[x]: Waking Up RFID Reader");
     delay(1000);
     SPI.begin();
-    rfid.PCD_Init();
+    // Initiate PN532 HERE
+    nfc.begin();
+    uint32_t versiondata = nfc.getFirmwareVersion();
+    if (!versiondata) {
+      Serial.println("Didn't find PN53x board");
+      while (!versiondata) {
+        delay(1000);
+        Serial.println("Try To find PN53x board");
+        nfc.begin();
+        versiondata = nfc.getFirmwareVersion();
+      }
+    }
+    Serial.print("Found chip PN5");
+    Serial.println((versiondata >> 24) & 0xFF, HEX);
+    Serial.print("Firmware ver. ");
+    Serial.print((versiondata >> 16) & 0xFF, DEC);
+    Serial.print('.');
+    Serial.println((versiondata >> 8) & 0xFF, DEC);
+    nfc.SAMConfig();
     Serial.println("[x]: Device Ready");
   }
 }
 
 long id = 0;
 int reading = 100;
+int TapCount = 0;
 void loop() {
   // INFO: TUCH BUTTON
   // Serial.println(analogRead(TOUCH));
@@ -656,6 +718,45 @@ void loop() {
   }
 
   // INFO: RFID
+  // readNFC();
+  boolean success;
+  uint8_t uid[] = {0, 0, 0, 0, 0, 0, 0}; // Buffer to store the returned UID
+  uint8_t uidLength; // Length of the UID (4 or 7 bytes depending on
+  // ISO14443A
+  // card type)
+  success =
+      nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, &uid[0], &uidLength, 100);
+  if (success) {
+    TapCount += 1;
+    cardIdContainer = "";
+    Serial.print("UID Value: ");
+    for (uint8_t i = 0; i < uidLength; i++) {
+      nuidPICC[i] = uid[i];
+      Serial.print(" ");
+      Serial.print(uid[i], HEX);
+      cardIdContainer.concat(String(uid[i], HEX));
+    }
+    Serial.println();
+    tagId = tagToString(nuidPICC);
+    Serial.print(F("tagId is : "));
+    Serial.println(tagId);
+    Serial.println("");
+    //  Jika Waktu Menempel kartu masih kurang dari dua detik dari kartu
+    //  terakhir yang di tempelkan maka jangan ijinkan mengirim data
+    Serial.println("TAP COUNT: " + String(TapCount));
+    if (rfidScanTime != 0 && millis() - rfidScanTime < 2000) {
+      // Serial.println("[x]: Device Cant Send Request");
+      isDeviceAllowToSendAuth = false;
+    } else {
+      isCardExist = true;
+      isDeviceAllowToSendAuth = true;
+      rfidScanTime = millis();
+      // Serial.println("[x]: Device Can Send Request");
+    }
+    delay(50);
+  }
+
+  /*
   if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
     cardIdContainer = "";
     for (byte i = 0; i < rfid.uid.size; i++) {
@@ -677,6 +778,7 @@ void loop() {
       // Serial.println("[x]: Device Can Send Request");
     }
   }
+  */
 
   // INFO: CONNECTION
   if (isConnectionReady) {
@@ -885,5 +987,6 @@ void loop() {
     isDisplayShowAlertHaveLimit = false;
   }
 
-  rfid.PCD_Init();
+  // rfid.PCD_Init();
+  nfc.begin();
 }
